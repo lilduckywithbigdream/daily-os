@@ -70,11 +70,53 @@ if (!header || !main || !navigation) {
 
 // ---------- 3. START APP ----------
 
+
 function startApp() {
-  renderHeader();
-  renderNavigation();
-  showPage("Today");
+  try {
+    console.log("DAILY OS: Starting...");
+
+    renderHeader();
+    console.log("DAILY OS: Header rendered.");
+
+    renderNavigation();
+    console.log("DAILY OS: Navigation rendered.");
+
+    showPage("Today");
+    console.log("DAILY OS: Today page rendered.");
+
+  } catch (error) {
+    console.error("DAILY OS STARTUP ERROR:", error);
+
+    main.innerHTML = "";
+    navigation.innerHTML = "";
+
+    const errorCard = document.createElement("section");
+    errorCard.className = "card";
+
+    const errorTitle = document.createElement("h2");
+    errorTitle.className = "section-title";
+    errorTitle.textContent = "DAILY OS Startup Error";
+
+    const errorMessage = document.createElement("p");
+    errorMessage.className = "secondary-text";
+    errorMessage.textContent =
+      error.name + ": " + error.message;
+
+    const instruction = document.createElement("p");
+    instruction.className = "secondary-text";
+    instruction.textContent =
+      "Please send this error message to ChatGPT.";
+
+    errorCard.append(
+      errorTitle,
+      errorMessage,
+      instruction
+    );
+
+    main.appendChild(errorCard);
+  }
 }
+
 
 function renderHeader() {
   header.innerHTML = `
