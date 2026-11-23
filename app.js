@@ -1,17 +1,24 @@
 
 /* =========================================
    DAILY OS — Core App
-   Version 1.1
+   Version 1.2
    Tasks | Habits | Analytics
    ========================================= */
 
 "use strict";
 
 // =========================================
-// 1. CONFIGURATION & APP DATA
+// 1. CONFIGURATION
 // =========================================
 
 const STORAGE_KEY = "daily-os-data";
+
+const pages = [
+  "Today",
+  "Tasks",
+  "Habits",
+  "Analytics"
+];
 
 let data = {
   tasks: [],
@@ -23,7 +30,10 @@ let main = null;
 let navigation = null;
 let currentPage = "Today";
 
-// Get today's date in local time
+// =========================================
+// 2. DATE & ID HELPERS
+// =========================================
+
 function getTodayKey() {
   const date = new Date();
   const year = date.getFullYear();
@@ -33,7 +43,6 @@ function getTodayKey() {
   return `${year}-${month}-${day}`;
 }
 
-// Generate a unique ID
 function createId() {
   if (
     typeof crypto !== "undefined" &&
@@ -47,10 +56,9 @@ function createId() {
 }
 
 // =========================================
-// 2. DATA MANAGEMENT
+// 3. DATA MANAGEMENT
 // =========================================
 
-// Load saved data safely
 function loadData() {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
@@ -70,11 +78,11 @@ function loadData() {
 
     const tasks = Array.isArray(parsed.tasks)
       ? parsed.tasks
-          .filter((task) =>
+          .filter(task =>
             task &&
             typeof task.title === "string"
           )
-          .map((task) => ({
+          .map(task => ({
             id: task.id || createId(),
             title: task.title,
             completed: task.completed === true,
@@ -84,16 +92,16 @@ function loadData() {
 
     const habits = Array.isArray(parsed.habits)
       ? parsed.habits
-          .filter((habit) =>
+          .filter(habit =>
             habit &&
             typeof habit.title === "string"
           )
-          .map((habit) => ({
+          .map(habit => ({
             id: habit.id || createId(),
             title: habit.title,
             completedDates: Array.isArray(habit.completedDates)
               ? habit.completedDates.filter(
-                  (date) => typeof date === "string"
+                  date => typeof date === "string"
                 )
               : []
           }))
@@ -111,7 +119,6 @@ function loadData() {
   }
 }
 
-// Save data safely
 function saveData() {
   try {
     localStorage.setItem(
@@ -133,7 +140,7 @@ function saveData() {
 }
 
 // =========================================
-// 3. GENERAL HELPERS
+// 4. GENERAL HELPERS
 // =========================================
 
 function createElement(tag, className, text) {
@@ -196,7 +203,7 @@ function createButton(text, className, onClick) {
 
 function getCompletedTasks() {
   return data.tasks.filter(
-    (task) => task.completed
+    task => task.completed
   ).length;
 }
 
@@ -204,12 +211,12 @@ function getCompletedHabits() {
   const today = getTodayKey();
 
   return data.habits.filter(
-    (habit) => habit.completedDates.includes(today)
+    habit => habit.completedDates.includes(today)
   ).length;
 }
 
 // =========================================
-// 4. ERROR HANDLING
+// 5. ERROR HANDLING
 // =========================================
 
 function showStartupError(error) {
@@ -270,7 +277,7 @@ function showFatalError(message) {
 }
 
 // =========================================
-// 5. APP INITIALIZATION
+// 6. APP INITIALIZATION
 // =========================================
 
 function startApp() {
@@ -281,33 +288,27 @@ function startApp() {
     main = document.getElementById("main-content");
     navigation = document.getElementById("bottom-navigation");
 
-    // Check required HTML elements
     if (!header || !main || !navigation) {
       showFatalError(
         "Required HTML elements are missing. " +
-        "Please check app-header, main-content, " +
-        "and bottom-navigation in index.html."
+        "Check app-header, main-content, and " +
+        "bottom-navigation in index.html."
       );
 
       return;
     }
 
-    // Load saved data
     data = loadData();
 
     console.log("DAILY OS: Data loaded.");
 
-    // Build the application
     renderHeader();
-
     console.log("DAILY OS: Header rendered.");
 
     renderNavigation();
-
     console.log("DAILY OS: Navigation rendered.");
 
     showPage("Today");
-
     console.log("DAILY OS: Today page rendered.");
 
   } catch (error) {
@@ -327,7 +328,7 @@ if (document.readyState === "loading") {
 }
 
 // =========================================
-// 6. HEADER
+// 7. HEADER
 // =========================================
 
 function renderHeader() {
@@ -375,20 +376,13 @@ function renderHeader() {
 }
 
 // =========================================
-// 7. NAVIGATION
+// 8. NAVIGATION
 // =========================================
-
-const pages = [
-  "Today",
-  "Tasks",
-  "Habits",
-  "Analytics"
-];
 
 function renderNavigation() {
   clearElement(navigation);
 
-  pages.forEach((page) => {
+  pages.forEach(page => {
     const button = createButton(
       page,
       "nav-item",
@@ -411,7 +405,7 @@ function showPage(page) {
 
     navigation
       .querySelectorAll(".nav-item")
-      .forEach((button) => {
+      .forEach(button => {
         const active = button.dataset.page === page;
 
         button.classList.toggle("active", active);
@@ -423,21 +417,10 @@ function showPage(page) {
         }
       });
 
-    if (page === "Today") {
-      renderToday();
-    }
-
-    if (page === "Tasks") {
-      renderTasks();
-    }
-
-    if (page === "Habits") {
-      renderHabits();
-    }
-
-    if (page === "Analytics") {
-      renderAnalytics();
-    }
+    if (page === "Today") renderToday();
+    if (page === "Tasks") renderTasks();
+    if (page === "Habits") renderHabits();
+    if (page === "Analytics") renderAnalytics();
 
   } catch (error) {
     showStartupError(error);
@@ -445,7 +428,7 @@ function showPage(page) {
 }
 
 // =========================================
-// 8. TODAY PAGE
+// 9. TODAY PAGE
 // =========================================
 
 function renderToday() {
@@ -490,10 +473,12 @@ function renderToday() {
 
   const progressCard = createCard("DAILY PROGRESS");
 
-  const progressText = createElement(
-    "p",
-    "progress-text",
-    `${percentage}% completed`
+  progressCard.appendChild(
+    createElement(
+      "p",
+      "progress-text",
+      `${percentage}% completed`
+    )
   );
 
   const progressTrack = createElement(
@@ -510,16 +495,14 @@ function renderToday() {
 
   progressTrack.appendChild(progressBar);
 
-  const progressDetails = createElement(
-    "p",
-    "secondary-text",
-    `${completedItems} of ${totalItems} items completed`
-  );
+  progressCard.appendChild(progressTrack);
 
-  progressCard.append(
-    progressText,
-    progressTrack,
-    progressDetails
+  progressCard.appendChild(
+    createElement(
+      "p",
+      "secondary-text",
+      `${completedItems} of ${totalItems} items completed`
+    )
   );
 
   main.appendChild(progressCard);
@@ -528,7 +511,7 @@ function renderToday() {
   const taskCard = createCard("TODAY'S TASKS");
 
   const pendingTasks = data.tasks.filter(
-    (task) => !task.completed
+    task => !task.completed
   );
 
   if (pendingTasks.length === 0) {
@@ -542,7 +525,7 @@ function renderToday() {
   } else {
     const list = createElement("div", "task-list");
 
-    pendingTasks.slice(0, 3).forEach((task) => {
+    pendingTasks.slice(0, 3).forEach(task => {
       list.appendChild(createTaskItem(task));
     });
 
@@ -565,7 +548,7 @@ function renderToday() {
   } else {
     const list = createElement("div", "habit-list");
 
-    data.habits.forEach((habit) => {
+    data.habits.forEach(habit => {
       list.appendChild(createHabitItem(habit));
     });
 
@@ -576,29 +559,20 @@ function renderToday() {
 }
 
 // =========================================
-// 9. TASKS PAGE
+// 10. TASKS PAGE
 // =========================================
 
 function renderTasks() {
   clearElement(main);
 
   main.appendChild(
-    createElement(
-      "p",
-      "eyebrow",
-      "GET THINGS DONE"
-    )
+    createElement("p", "eyebrow", "GET THINGS DONE")
   );
 
   main.appendChild(
-    createElement(
-      "h2",
-      "page-title",
-      "Tasks"
-    )
+    createElement("h2", "page-title", "Tasks")
   );
 
-  // Add task form
   const form = document.createElement("form");
   form.className = "card";
 
@@ -621,7 +595,7 @@ function renderTasks() {
 
   form.append(input, addButton);
 
-  form.addEventListener("submit", (event) => {
+  form.addEventListener("submit", event => {
     event.preventDefault();
 
     const title = input.value.trim();
@@ -635,13 +609,13 @@ function renderTasks() {
       createdAt: getTodayKey()
     });
 
-    saveData();
-    renderTasks();
+    if (saveData()) {
+      renderTasks();
+    }
   });
 
   main.appendChild(form);
 
-  // Task list
   const taskCard = createCard(
     `ALL TASKS (${data.tasks.length})`
   );
@@ -657,10 +631,8 @@ function renderTasks() {
   } else {
     const list = createElement("div", "task-list");
 
-    data.tasks.forEach((task) => {
-      list.appendChild(
-        createTaskItem(task, true)
-      );
+    data.tasks.forEach(task => {
+      list.appendChild(createTaskItem(task, true));
     });
 
     taskCard.appendChild(list);
@@ -685,8 +657,9 @@ function createTaskItem(task, allowDelete = false) {
   checkbox.addEventListener("change", () => {
     task.completed = checkbox.checked;
 
-    saveData();
-    showPage(currentPage);
+    if (saveData()) {
+      showPage(currentPage);
+    }
   });
 
   const title = createElement(
@@ -707,11 +680,12 @@ function createTaskItem(task, allowDelete = false) {
       "delete-button",
       () => {
         data.tasks = data.tasks.filter(
-          (entry) => entry.id !== task.id
+          entry => entry.id !== task.id
         );
 
-        saveData();
-        renderTasks();
+        if (saveData()) {
+          renderTasks();
+        }
       }
     );
 
@@ -727,7 +701,7 @@ function createTaskItem(task, allowDelete = false) {
 }
 
 // =========================================
-// 10. HABITS PAGE
+// 11. HABITS PAGE
 // =========================================
 
 function renderHabits() {
@@ -742,14 +716,9 @@ function renderHabits() {
   );
 
   main.appendChild(
-    createElement(
-      "h2",
-      "page-title",
-      "Habits"
-    )
+    createElement("h2", "page-title", "Habits")
   );
 
-  // Add habit form
   const form = document.createElement("form");
   form.className = "card";
 
@@ -772,7 +741,7 @@ function renderHabits() {
 
   form.append(input, addButton);
 
-  form.addEventListener("submit", (event) => {
+  form.addEventListener("submit", event => {
     event.preventDefault();
 
     const title = input.value.trim();
@@ -785,13 +754,13 @@ function renderHabits() {
       completedDates: []
     });
 
-    saveData();
-    renderHabits();
+    if (saveData()) {
+      renderHabits();
+    }
   });
 
   main.appendChild(form);
 
-  // Habit list
   const habitCard = createCard(
     `YOUR HABITS (${data.habits.length})`
   );
@@ -807,10 +776,8 @@ function renderHabits() {
   } else {
     const list = createElement("div", "habit-list");
 
-    data.habits.forEach((habit) => {
-      list.appendChild(
-        createHabitItem(habit, true)
-      );
+    data.habits.forEach(habit => {
+      list.appendChild(createHabitItem(habit, true));
     });
 
     habitCard.appendChild(list);
@@ -826,8 +793,10 @@ function createHabitItem(habit, allowDelete = false) {
 
   checkbox.type = "checkbox";
 
+  const today = getTodayKey();
+
   const completedToday =
-    habit.completedDates.includes(getTodayKey());
+    habit.completedDates.includes(today);
 
   checkbox.checked = completedToday;
 
@@ -837,8 +806,6 @@ function createHabitItem(habit, allowDelete = false) {
   );
 
   checkbox.addEventListener("change", () => {
-    const today = getTodayKey();
-
     if (checkbox.checked) {
       if (!habit.completedDates.includes(today)) {
         habit.completedDates.push(today);
@@ -846,12 +813,13 @@ function createHabitItem(habit, allowDelete = false) {
     } else {
       habit.completedDates =
         habit.completedDates.filter(
-          (date) => date !== today
+          date => date !== today
         );
     }
 
-    saveData();
-    showPage(currentPage);
+    if (saveData()) {
+      showPage(currentPage);
+    }
   });
 
   const title = createElement(
@@ -872,11 +840,12 @@ function createHabitItem(habit, allowDelete = false) {
       "delete-button",
       () => {
         data.habits = data.habits.filter(
-          (entry) => entry.id !== habit.id
+          entry => entry.id !== habit.id
         );
 
-        saveData();
-        renderHabits();
+        if (saveData()) {
+          renderHabits();
+        }
       }
     );
 
@@ -892,7 +861,7 @@ function createHabitItem(habit, allowDelete = false) {
 }
 
 // =========================================
-// 11. ANALYTICS PAGE
+// 12. ANALYTICS PAGE
 // =========================================
 
 function renderAnalytics() {
@@ -907,11 +876,7 @@ function renderAnalytics() {
   );
 
   main.appendChild(
-    createElement(
-      "h2",
-      "page-title",
-      "Analytics"
-    )
+    createElement("h2", "page-title", "Analytics")
   );
 
   // Task overview
@@ -1000,7 +965,7 @@ function renderAnalytics() {
 }
 
 // =========================================
-// 12. END OF DAILY OS
+// 13. APP READY
 // =========================================
 
 console.log("DAILY OS: App script loaded.");
