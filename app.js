@@ -1,8 +1,8 @@
 
 /* =========================================
    DAILY OS — Core App
-   Version 1.3
-   Tasks | Habits | Analytics
+   Version 1.4
+   Tasks | Habits | Analytics | Backup
    ========================================= */
 
 "use strict";
@@ -11,10 +11,10 @@
 // 1. CONFIGURATION
 // =========================================
 
-// IMPORTANT: Declare pages before starting the app.
 const pages = ["Today", "Tasks", "Habits", "Analytics"];
 
 const STORAGE_KEY = "daily-os-data";
+const BACKUP_VERSION = 1;
 
 let data = {
   tasks: [],
@@ -128,7 +128,218 @@ function saveData() {
 }
 
 // =========================================
-// 4. GENERAL HELPERS
+// 4. BACKUP DATA VALIDATION
+// =========================================
+
+function validateBackupData(backupData) {
+  if (
+    !backupData ||
+    typeof backupData !== "object" ||
+    !Array.isArray(backupData.tasks) ||
+    !Array.isArray(backupData.habits)
+  ) {
+    throw new Error(
+      "Invalid backup structure. Tasks and Habits are required."
+    );
+  }
+
+  const invalidTask = backupData.tasks.some(task =>
+    !task ||
+    typeof task !== "object" ||
+    typeof task.title !== "string"
+  );
+
+  if (invalidTask) {
+    throw new Error(
+      "Backup contains an invalid task."
+    );
+  }
+
+  const invalidHabit = backupData.habits.some(habit =>
+    !habit ||
+    typeof habit !== "object" ||
+    typeof habit.title !== "string" ||
+    (
+      habit.completedDates !== undefined &&
+      !Array.isArray(habit.completedDates)
+    )
+  );
+
+  if (invalidHabit) {
+    throw new Error(
+      "Backup contains an invalid habit."
+    );
+  }
+
+  const invalidHabitDates = backupData.habits.some(habit =>
+    Array.isArray(habit.completedDates) &&
+    habit.completedDates.some(
+      date => typeof date !== "string"
+    )
+  );
+
+  if (invalidHabitDates) {
+    throw new Error(
+      "Backup contains invalid habit completion dates."
+    );
+  }
+
+  return true;
+}
+
+// =========================================
+// 5. BACKUP DATA NORMALIZATION
+// =========================================
+
+function normalizeBackupData(backupData) {
+  validateBackupData(backupData);
+
+  const tasks = backupData.tasks.map(task => ({
+    ...task,
+    id: task.id || createId(),
+    title: task.title,
+    completed: task.completed === true,
+    createdAt: task.createdAt || getTodayKey()
+  }));
+
+  const habits = backupData.habits.map(habit => ({
+    ...habit,
+    id: habit.id || createId(),
+    title: habit.title,
+    completedDates: Array.isArray(habit.completedDates)
+      ? [...habit.completedDates]
+      : []
+  }));
+
+  return {
+    tasks,
+    habits
+  };
+}
+
+// =========================================
+// 6. BACKUP EXPORT
+// =========================================
+
+function exportBackup() {
+  try {
+    const backup = {
+      app: "DAILY OS",
+      backupVersion: BACKUP_VERSION,
+      exportedAt: new Date().toISOString(),
+      data: JSON.parse(JSON.stringify(data))
+    };
+
+    const json = JSON.stringify(backup, null, 2);
+
+    const blob = new Blob(
+      [json],
+      { type: "application/json" }
+    );
+
+    const url = URL.createObjectURL(blob);
+
+    const link = document.createElement("a");
+
+    link.href = url;
+    link.download = `daily-os-backup-${getTodayKey()}.json`;
+    link.style.display = "none";
+
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+
+    setTimeout(() => {
+      URL.revokeObjectURL(url);
+    }, 1000);
+
+  } catch (error) {
+    console.error("DAILY OS: Backup export failed:", error);
+
+    alert(
+      "Unable to export backup. Please try again."
+    );
+  }
+}
+
+// =========================================
+// 7. BACKUP IMPORT
+// =========================================
+
+function importBackupFile(file) {
+  if (!file) return;
+
+  const reader = new FileReader();
+
+  reader.onload = () => {
+    try {
+      const parsed = JSON.parse(reader.result);
+
+      // Support both the new backup envelope
+      // and the original { tasks, habits } format.
+      let backupData;
+
+      if (
+        parsed &&
+        parsed.app === "DAILY OS" &&
+        parsed.data
+      ) {
+        backupData = parsed.data;
+      } else {
+        backupData = parsed;
+      }
+
+      const importedData = normalizeBackupData(backupData);
+
+      const confirmed = window.confirm(
+        "Import this backup?\n\n" +
+        `Tasks: ${importedData.tasks.length}\n` +
+        `Habits: ${importedData.habits.length}\n\n` +
+        "WARNING: Your current Tasks and Habits " +
+        "will be replaced by the backup."
+      );
+
+      if (!confirmed) return;
+
+      const previousData = data;
+
+      data = importedData;
+
+      if (!saveData()) {
+        data = previousData;
+        return;
+      }
+
+      alert(
+        "Backup imported successfully!\n\n" +
+        `Tasks: ${data.tasks.length}\n` +
+        `Habits: ${data.habits.length}`
+      );
+
+      showPage(currentPage);
+
+    } catch (error) {
+      console.error("DAILY OS: Backup import failed:", error);
+
+      alert(
+        "Backup import failed.\n\n" +
+        (error.message || "Invalid backup file.") +
+        "\n\nYour current data has not been intentionally replaced."
+      );
+    }
+  };
+
+  reader.onerror = () => {
+    alert(
+      "Unable to read this file. Please try another backup file."
+    );
+  };
+
+  reader.readAsText(file);
+}
+
+// =========================================
+// 8. GENERAL HELPERS
 // =========================================
 
 function createElement(tag, className, text) {
@@ -167,7 +378,7 @@ function getCompletedHabits() {
 }
 
 // =========================================
-// 5. ERROR DISPLAY
+// 9. ERROR DISPLAY
 // =========================================
 
 function showStartupError(error) {
@@ -212,7 +423,7 @@ function showSetupError(message) {
 }
 
 // =========================================
-// 6. APP INITIALIZATION
+// 10. APP INITIALIZATION
 // =========================================
 
 function startApp() {
@@ -256,7 +467,7 @@ if (document.readyState === "loading") {
 }
 
 // =========================================
-// 7. HEADER
+// 11. HEADER
 // =========================================
 
 function renderHeader() {
@@ -300,7 +511,7 @@ function renderHeader() {
 }
 
 // =========================================
-// 8. NAVIGATION
+// 12. NAVIGATION
 // =========================================
 
 function renderNavigation() {
@@ -354,7 +565,7 @@ function showPage(page) {
 }
 
 // =========================================
-// 9. TODAY PAGE
+// 13. TODAY PAGE
 // =========================================
 
 function renderToday() {
@@ -466,7 +677,7 @@ function renderToday() {
 }
 
 // =========================================
-// 10. TASKS PAGE
+// 14. TASKS PAGE
 // =========================================
 
 function renderTasks() {
@@ -599,7 +810,7 @@ function createTaskItem(task, allowDelete = false) {
 }
 
 // =========================================
-// 11. HABITS PAGE
+// 15. HABITS PAGE
 // =========================================
 
 function renderHabits() {
@@ -743,7 +954,96 @@ function createHabitItem(habit, allowDelete = false) {
 }
 
 // =========================================
-// 12. ANALYTICS PAGE
+// 16. BACKUP INTERFACE
+// =========================================
+
+function renderBackupSection() {
+  const backupCard = createCard("DATA BACKUP");
+
+  backupCard.appendChild(
+    createElement(
+      "p",
+      "secondary-text",
+      "Protect your Tasks and Habits by keeping a backup file."
+    )
+  );
+
+  const actions = createElement("div", "backup-actions");
+
+  actions.style.cssText = [
+    "display:flex",
+    "flex-direction:column",
+    "gap:10px",
+    "margin-top:16px"
+  ].join(";");
+
+  const exportButton = createElement(
+    "button",
+    "primary-button",
+    "↓ Export Backup"
+  );
+
+  exportButton.type = "button";
+
+  exportButton.addEventListener("click", () => {
+    exportBackup();
+  });
+
+  const importButton = createElement(
+    "button",
+    "primary-button",
+    "↑ Import Backup"
+  );
+
+  importButton.type = "button";
+
+  const fileInput = document.createElement("input");
+
+  fileInput.type = "file";
+  fileInput.accept = ".json,application/json";
+  fileInput.hidden = true;
+  fileInput.setAttribute(
+    "aria-label",
+    "Choose a DAILY OS backup file"
+  );
+
+  importButton.addEventListener("click", () => {
+    fileInput.click();
+  });
+
+  fileInput.addEventListener("change", () => {
+    const file = fileInput.files && fileInput.files[0];
+
+    if (file) {
+      importBackupFile(file);
+    }
+
+    // Allows selecting the same file again.
+    fileInput.value = "";
+  });
+
+  actions.append(
+    exportButton,
+    importButton,
+    fileInput
+  );
+
+  backupCard.appendChild(actions);
+
+  backupCard.appendChild(
+    createElement(
+      "p",
+      "secondary-text",
+      "Importing a backup replaces your current Tasks and Habits. " +
+      "Always export your latest data before importing."
+    )
+  );
+
+  main.appendChild(backupCard);
+}
+
+// =========================================
+// 17. ANALYTICS PAGE
 // =========================================
 
 function renderAnalytics() {
@@ -821,10 +1121,13 @@ function renderAnalytics() {
   );
 
   main.appendChild(totalCard);
+
+  // Backup section
+  renderBackupSection();
 }
 
 // =========================================
-// 13. APP STATUS
+// 18. APP STATUS
 // =========================================
 
 console.log("DAILY OS: Script loaded.");
