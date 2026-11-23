@@ -1,7 +1,7 @@
 
 /* =========================================
    DAILY OS — Core App
-   Version 1.4
+   Version 2.0
    Tasks | Habits | Analytics | Backup
    ========================================= */
 
@@ -14,7 +14,17 @@
 const pages = ["Today", "Tasks", "Habits", "Analytics"];
 
 const STORAGE_KEY = "daily-os-data";
-const BACKUP_VERSION = 1;
+const BACKUP_VERSION = 2;
+
+const TASK_PRIORITIES = ["High", "Medium", "Low"];
+
+const TASK_CATEGORIES = [
+  "Personal",
+  "Study",
+  "Trading",
+  "Basketball",
+  "Health"
+];
 
 let data = {
   tasks: [],
@@ -25,6 +35,7 @@ let header = null;
 let main = null;
 let navigation = null;
 let currentPage = "Today";
+let editingTaskId = null;
 
 // =========================================
 // 2. DATE AND ID HELPERS
@@ -37,6 +48,28 @@ function getTodayKey() {
   const day = String(date.getDate()).padStart(2, "0");
 
   return `${year}-${month}-${day}`;
+}
+
+function isValidDateKey(value) {
+  if (typeof value !== "string") return false;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+
+  const date = new Date(`${value}T00:00:00`);
+
+  return !Number.isNaN(date.getTime()) &&
+    date.toISOString().slice(0, 10) === value;
+}
+
+function formatDate(value) {
+  if (!isValidDateKey(value)) return "";
+
+  const date = new Date(`${value}T00:00:00`);
+
+  return date.toLocaleDateString("en-US", {
+    day: "numeric",
+    month: "short",
+    year: "numeric"
+  });
 }
 
 function createId() {
@@ -52,7 +85,39 @@ function createId() {
 }
 
 // =========================================
-// 3. DATA MANAGEMENT
+// 3. TASK NORMALIZATION
+// =========================================
+
+function normalizeTask(task) {
+  return {
+    id: typeof task.id === "string" && task.id
+      ? task.id
+      : createId(),
+
+    title: task.title.trim(),
+
+    completed: task.completed === true,
+
+    createdAt: isValidDateKey(task.createdAt)
+      ? task.createdAt
+      : getTodayKey(),
+
+    priority: TASK_PRIORITIES.includes(task.priority)
+      ? task.priority
+      : "Medium",
+
+    category: TASK_CATEGORIES.includes(task.category)
+      ? task.category
+      : "Personal",
+
+    dueDate: isValidDateKey(task.dueDate)
+      ? task.dueDate
+      : ""
+  };
+}
+
+// =========================================
+// 4. DATA MANAGEMENT
 // =========================================
 
 function loadData() {
@@ -76,14 +141,10 @@ function loadData() {
       ? parsed.tasks
           .filter(task =>
             task &&
-            typeof task.title === "string"
+            typeof task.title === "string" &&
+            task.title.trim().length > 0
           )
-          .map(task => ({
-            id: task.id || createId(),
-            title: task.title,
-            completed: task.completed === true,
-            createdAt: task.createdAt || getTodayKey()
-          }))
+          .map(normalizeTask)
       : [];
 
     const habits = Array.isArray(parsed.habits)
@@ -97,7 +158,8 @@ function loadData() {
             title: habit.title,
             completedDates: Array.isArray(habit.completedDates)
               ? habit.completedDates.filter(
-                  date => typeof date === "string"
+                  date => typeof date === "string" &&
+                    isValidDateKey(date)
                 )
               : []
           }))
@@ -122,13 +184,17 @@ function saveData() {
 
   } catch (error) {
     console.error("DAILY OS: Could not save data:", error);
-    alert("Unable to save data. Please check browser storage.");
+
+    alert(
+      "Unable to save data. Please check browser storage."
+    );
+
     return false;
   }
 }
 
 // =========================================
-// 4. BACKUP DATA VALIDATION
+// 5. BACKUP DATA VALIDATION
 // =========================================
 
 function validateBackupData(backupData) {
@@ -146,13 +212,32 @@ function validateBackupData(backupData) {
   const invalidTask = backupData.tasks.some(task =>
     !task ||
     typeof task !== "object" ||
-    typeof task.title !== "string"
+    typeof task.title !== "string" ||
+    !task.title.trim()
   );
 
   if (invalidTask) {
-    throw new Error(
-      "Backup contains an invalid task."
-    );
+    throw new Error("Backup contains an invalid task.");
+  }
+
+  const invalidTaskFields = backupData.tasks.some(task =>
+    (
+      task.priority !== undefined &&
+      !TASK_PRIORITIES.includes(task.priority)
+    ) ||
+    (
+      task.category !== undefined &&
+      !TASK_CATEGORIES.includes(task.category)
+    ) ||
+    (
+      task.dueDate !== undefined &&
+      task.dueDate !== "" &&
+      !isValidDateKey(task.dueDate)
+    )
+  );
+
+  if (invalidTaskFields) {
+    throw new Error("Backup contains invalid task details.");
   }
 
   const invalidHabit = backupData.habits.some(habit =>
@@ -166,44 +251,33 @@ function validateBackupData(backupData) {
   );
 
   if (invalidHabit) {
-    throw new Error(
-      "Backup contains an invalid habit."
-    );
+    throw new Error("Backup contains an invalid habit.");
   }
 
   const invalidHabitDates = backupData.habits.some(habit =>
     Array.isArray(habit.completedDates) &&
     habit.completedDates.some(
-      date => typeof date !== "string"
+      date => !isValidDateKey(date)
     )
   );
 
   if (invalidHabitDates) {
-    throw new Error(
-      "Backup contains invalid habit completion dates."
-    );
+    throw new Error("Backup contains invalid habit dates.");
   }
 
   return true;
 }
 
 // =========================================
-// 5. BACKUP DATA NORMALIZATION
+// 6. BACKUP DATA NORMALIZATION
 // =========================================
 
 function normalizeBackupData(backupData) {
   validateBackupData(backupData);
 
-  const tasks = backupData.tasks.map(task => ({
-    ...task,
-    id: task.id || createId(),
-    title: task.title,
-    completed: task.completed === true,
-    createdAt: task.createdAt || getTodayKey()
-  }));
+  const tasks = backupData.tasks.map(normalizeTask);
 
   const habits = backupData.habits.map(habit => ({
-    ...habit,
     id: habit.id || createId(),
     title: habit.title,
     completedDates: Array.isArray(habit.completedDates)
@@ -218,7 +292,7 @@ function normalizeBackupData(backupData) {
 }
 
 // =========================================
-// 6. BACKUP EXPORT
+// 7. BACKUP EXPORT
 // =========================================
 
 function exportBackup() {
@@ -238,7 +312,6 @@ function exportBackup() {
     );
 
     const url = URL.createObjectURL(blob);
-
     const link = document.createElement("a");
 
     link.href = url;
@@ -256,14 +329,12 @@ function exportBackup() {
   } catch (error) {
     console.error("DAILY OS: Backup export failed:", error);
 
-    alert(
-      "Unable to export backup. Please try again."
-    );
+    alert("Unable to export backup. Please try again.");
   }
 }
 
 // =========================================
-// 7. BACKUP IMPORT
+// 8. BACKUP IMPORT
 // =========================================
 
 function importBackupFile(file) {
@@ -275,17 +346,20 @@ function importBackupFile(file) {
     try {
       const parsed = JSON.parse(reader.result);
 
-      // Support both the new backup envelope
-      // and the original { tasks, habits } format.
       let backupData;
 
-      if (
-        parsed &&
-        parsed.app === "DAILY OS" &&
-        parsed.data
-      ) {
+      if (parsed && parsed.app === "DAILY OS") {
+        if (
+          !Number.isInteger(parsed.backupVersion) ||
+          parsed.backupVersion < 1 ||
+          parsed.backupVersion > BACKUP_VERSION
+        ) {
+          throw new Error("Unsupported backup version.");
+        }
+
         backupData = parsed.data;
       } else {
+        // Support older { tasks, habits } backup format.
         backupData = parsed;
       }
 
@@ -302,13 +376,14 @@ function importBackupFile(file) {
       if (!confirmed) return;
 
       const previousData = data;
-
       data = importedData;
 
       if (!saveData()) {
         data = previousData;
         return;
       }
+
+      editingTaskId = null;
 
       alert(
         "Backup imported successfully!\n\n" +
@@ -330,29 +405,30 @@ function importBackupFile(file) {
   };
 
   reader.onerror = () => {
-    alert(
-      "Unable to read this file. Please try another backup file."
-    );
+    alert("Unable to read this file. Please try another backup file.");
   };
 
   reader.readAsText(file);
 }
 
 // =========================================
-// 8. GENERAL HELPERS
+// 9. GENERAL HELPERS
 // =========================================
 
 function createElement(tag, className, text) {
   const element = document.createElement(tag);
 
-  if (className) {
-    element.className = className;
-  }
+  if (className) element.className = className;
 
   if (text !== undefined) {
     element.textContent = text;
   }
 
+  return element;
+}
+
+function applyStyles(element, styles) {
+  Object.assign(element.style, styles);
   return element;
 }
 
@@ -363,6 +439,80 @@ function createCard(title) {
   card.appendChild(heading);
 
   return card;
+}
+
+function createFieldLabel(text) {
+  return createElement("label", "secondary-text", text);
+}
+
+function createSelect(options, selectedValue) {
+  const select = document.createElement("select");
+
+  applyStyles(select, {
+    width: "100%",
+    minHeight: "44px",
+    padding: "10px",
+    borderRadius: "10px",
+    border: "1px solid #444",
+    background: "#171717",
+    color: "#fff",
+    fontSize: "14px"
+  });
+
+  options.forEach(option => {
+    const item = document.createElement("option");
+    item.value = option;
+    item.textContent = option;
+    select.appendChild(item);
+  });
+
+  select.value = selectedValue;
+
+  return select;
+}
+
+function createInput(type, placeholder) {
+  const input = document.createElement("input");
+
+  input.type = type;
+  input.placeholder = placeholder;
+
+  applyStyles(input, {
+    width: "100%",
+    minHeight: "44px",
+    boxSizing: "border-box",
+    padding: "10px",
+    borderRadius: "10px",
+    border: "1px solid #444",
+    background: "#171717",
+    color: "#fff",
+    fontSize: "14px"
+  });
+
+  return input;
+}
+
+function createActionButton(text, secondary = false) {
+  const button = createElement(
+    "button",
+    secondary ? "secondary-button" : "primary-button",
+    text
+  );
+
+  button.type = "button";
+
+  if (secondary) {
+    applyStyles(button, {
+      background: "#252525",
+      color: "#fff",
+      border: "1px solid #444",
+      borderRadius: "10px",
+      padding: "10px 14px",
+      cursor: "pointer"
+    });
+  }
+
+  return button;
 }
 
 function getCompletedTasks() {
@@ -378,7 +528,7 @@ function getCompletedHabits() {
 }
 
 // =========================================
-// 9. ERROR DISPLAY
+// 10. ERROR DISPLAY
 // =========================================
 
 function showStartupError(error) {
@@ -394,19 +544,19 @@ function showStartupError(error) {
 
   const card = createCard("DAILY OS Startup Error");
 
-  const message = createElement(
-    "p",
-    "secondary-text",
-    `${error.name}: ${error.message}`
+  card.append(
+    createElement(
+      "p",
+      "secondary-text",
+      `${error.name}: ${error.message}`
+    ),
+    createElement(
+      "p",
+      "secondary-text",
+      "Please send this error message to ChatGPT."
+    )
   );
 
-  const instruction = createElement(
-    "p",
-    "secondary-text",
-    "Please send this error message to ChatGPT."
-  );
-
-  card.append(message, instruction);
   main.appendChild(card);
 }
 
@@ -423,7 +573,7 @@ function showSetupError(message) {
 }
 
 // =========================================
-// 10. APP INITIALIZATION
+// 11. APP INITIALIZATION
 // =========================================
 
 function startApp() {
@@ -455,7 +605,6 @@ function startApp() {
   }
 }
 
-// Start only after the HTML document is ready.
 if (document.readyState === "loading") {
   document.addEventListener(
     "DOMContentLoaded",
@@ -467,7 +616,7 @@ if (document.readyState === "loading") {
 }
 
 // =========================================
-// 11. HEADER
+// 12. HEADER
 // =========================================
 
 function renderHeader() {
@@ -490,10 +639,7 @@ function renderHeader() {
 
   titleGroup.append(eyebrow, title);
 
-  const dateElement = createElement(
-    "div",
-    "header-date"
-  );
+  const dateElement = createElement("div", "header-date");
 
   dateElement.id = "header-date";
 
@@ -511,7 +657,7 @@ function renderHeader() {
 }
 
 // =========================================
-// 12. NAVIGATION
+// 13. NAVIGATION
 // =========================================
 
 function renderNavigation() {
@@ -554,6 +700,10 @@ function showPage(page) {
       }
     });
 
+    if (page !== "Tasks") {
+      editingTaskId = null;
+    }
+
     if (page === "Today") renderToday();
     else if (page === "Tasks") renderTasks();
     else if (page === "Habits") renderHabits();
@@ -565,7 +715,7 @@ function showPage(page) {
 }
 
 // =========================================
-// 13. TODAY PAGE
+// 14. TODAY PAGE
 // =========================================
 
 function renderToday() {
@@ -581,7 +731,6 @@ function renderToday() {
     )
   );
 
-  // Daily progress
   const totalItems = data.tasks.length + data.habits.length;
 
   const completedItems =
@@ -594,11 +743,7 @@ function renderToday() {
   const progressCard = createCard("DAILY PROGRESS");
 
   progressCard.appendChild(
-    createElement(
-      "p",
-      "progress-text",
-      `${percentage}% completed`
-    )
+    createElement("p", "progress-text", `${percentage}% completed`)
   );
 
   const track = createElement("div", "progress-track");
@@ -625,12 +770,9 @@ function renderToday() {
 
   main.appendChild(progressCard);
 
-  // Task preview
   const taskCard = createCard("TODAY'S TASKS");
 
-  const pendingTasks = data.tasks.filter(
-    task => !task.completed
-  );
+  const pendingTasks = data.tasks.filter(task => !task.completed);
 
   if (pendingTasks.length === 0) {
     taskCard.appendChild(
@@ -652,7 +794,6 @@ function renderToday() {
 
   main.appendChild(taskCard);
 
-  // Habit preview
   const habitCard = createCard("DAILY HABITS");
 
   if (data.habits.length === 0) {
@@ -677,7 +818,7 @@ function renderToday() {
 }
 
 // =========================================
-// 14. TASKS PAGE
+// 15. TASKS PAGE — VERSION 2.0
 // =========================================
 
 function renderTasks() {
@@ -685,44 +826,170 @@ function renderTasks() {
 
   main.append(
     createElement("p", "eyebrow", "GET THINGS DONE"),
-    createElement("h2", "page-title", "Tasks")
+    createElement("h2", "page-title", "Tasks"),
+    createElement(
+      "p",
+      "secondary-text",
+      "Organize your work. Focus on what matters."
+    )
   );
+
+  const editingTask = editingTaskId
+    ? data.tasks.find(task => task.id === editingTaskId)
+    : null;
+
+  if (editingTaskId && !editingTask) {
+    editingTaskId = null;
+  }
 
   const form = document.createElement("form");
   form.className = "card";
 
-  const input = document.createElement("input");
-  input.type = "text";
-  input.placeholder = "Write a new task...";
-  input.maxLength = 120;
-  input.required = true;
-  input.className = "task-input";
-  input.setAttribute("aria-label", "New task");
-
-  const addButton = createElement(
-    "button",
-    "primary-button",
-    "＋ Add Task"
+  const formTitle = createElement(
+    "h3",
+    "section-title",
+    editingTask ? "EDIT TASK" : "NEW TASK"
   );
 
-  addButton.type = "submit";
+  const titleInput = createInput(
+    "text",
+    "Write a new task..."
+  );
 
-  form.append(input, addButton);
+  titleInput.maxLength = 120;
+  titleInput.required = true;
+  titleInput.setAttribute("aria-label", "Task title");
+
+  titleInput.value = editingTask ? editingTask.title : "";
+
+  const fields = applyStyles(
+    createElement("div", "task-fields"),
+    {
+      display: "grid",
+      gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))",
+      gap: "12px",
+      marginTop: "14px"
+    }
+  );
+
+  const priorityField = createElement("div", "task-field");
+  const priorityLabel = createFieldLabel("PRIORITY");
+
+  const prioritySelect = createSelect(
+    TASK_PRIORITIES,
+    editingTask ? editingTask.priority : "Medium"
+  );
+
+  priorityField.append(priorityLabel, prioritySelect);
+
+  const categoryField = createElement("div", "task-field");
+  const categoryLabel = createFieldLabel("CATEGORY");
+
+  const categorySelect = createSelect(
+    TASK_CATEGORIES,
+    editingTask ? editingTask.category : "Personal"
+  );
+
+  categoryField.append(categoryLabel, categorySelect);
+
+  const dateField = createElement("div", "task-field");
+  const dateLabel = createFieldLabel("DUE DATE");
+
+  const dateInput = createInput("date", "");
+  dateInput.setAttribute("aria-label", "Task due date");
+
+  dateInput.value = editingTask ? editingTask.dueDate : "";
+
+  dateField.append(dateLabel, dateInput);
+
+  [priorityLabel, categoryLabel, dateLabel].forEach(label => {
+    label.style.display = "block";
+    label.style.marginBottom = "6px";
+    label.style.fontSize = "11px";
+    label.style.letterSpacing = "1px";
+  });
+
+  fields.append(priorityField, categoryField, dateField);
+
+  const formActions = applyStyles(
+    createElement("div", "task-form-actions"),
+    {
+      display: "flex",
+      gap: "10px",
+      flexWrap: "wrap",
+      marginTop: "16px"
+    }
+  );
+
+  const submitButton = createActionButton(
+    editingTask ? "Save Changes" : "＋ Add Task"
+  );
+
+  submitButton.type = "submit";
+
+  formActions.appendChild(submitButton);
+
+  if (editingTask) {
+    const cancelButton = createActionButton("Cancel", true);
+
+    cancelButton.addEventListener("click", () => {
+      editingTaskId = null;
+      renderTasks();
+    });
+
+    formActions.appendChild(cancelButton);
+  }
+
+  form.append(
+    formTitle,
+    titleInput,
+    fields,
+    formActions
+  );
 
   form.addEventListener("submit", event => {
     event.preventDefault();
 
-    const title = input.value.trim();
-    if (!title) return;
+    const title = titleInput.value.trim();
 
-    data.tasks.push({
-      id: createId(),
-      title,
-      completed: false,
-      createdAt: getTodayKey()
-    });
+    if (!title) {
+      titleInput.focus();
+      return;
+    }
 
-    if (saveData()) renderTasks();
+    const previousData = JSON.parse(JSON.stringify(data));
+
+    if (editingTask) {
+      const task = data.tasks.find(
+        entry => entry.id === editingTask.id
+      );
+
+      if (!task) return;
+
+      task.title = title;
+      task.priority = prioritySelect.value;
+      task.category = categorySelect.value;
+      task.dueDate = dateInput.value || "";
+
+    } else {
+      data.tasks.push({
+        id: createId(),
+        title,
+        completed: false,
+        createdAt: getTodayKey(),
+        priority: prioritySelect.value,
+        category: categorySelect.value,
+        dueDate: dateInput.value || ""
+      });
+    }
+
+    if (!saveData()) {
+      data = previousData;
+      return;
+    }
+
+    editingTaskId = null;
+    renderTasks();
   });
 
   main.appendChild(form);
@@ -752,10 +1019,23 @@ function renderTasks() {
   main.appendChild(taskCard);
 }
 
-function createTaskItem(task, allowDelete = false) {
+// =========================================
+// 16. TASK ITEM
+// =========================================
+
+function createTaskItem(task, allowActions = false) {
   const item = createElement("div", "task-item");
 
+  applyStyles(item, {
+    display: "flex",
+    alignItems: "center",
+    gap: "10px",
+    flexWrap: "wrap",
+    padding: "10px 0"
+  });
+
   const checkbox = document.createElement("input");
+
   checkbox.type = "checkbox";
   checkbox.checked = task.completed;
 
@@ -765,24 +1045,126 @@ function createTaskItem(task, allowDelete = false) {
   );
 
   checkbox.addEventListener("change", () => {
+    const previous = task.completed;
+
     task.completed = checkbox.checked;
 
-    if (saveData()) showPage(currentPage);
+    if (!saveData()) {
+      task.completed = previous;
+      checkbox.checked = previous;
+      return;
+    }
+
+    showPage(currentPage);
   });
 
-  const title = createElement(
-    "span",
-    "task-title",
-    task.title
+  const info = applyStyles(
+    createElement("div", "task-information"),
+    {
+      flex: "1",
+      minWidth: "0"
+    }
   );
+
+  const title = createElement("span", "task-title", task.title);
 
   if (task.completed) {
     title.classList.add("completed");
   }
 
-  item.append(checkbox, title);
+  const metadata = applyStyles(
+    createElement("div", "task-metadata"),
+    {
+      display: "flex",
+      alignItems: "center",
+      gap: "6px",
+      flexWrap: "wrap",
+      marginTop: "6px"
+    }
+  );
 
-  if (allowDelete) {
+  const priority = createElement(
+    "span",
+    "task-priority",
+    task.priority
+  );
+
+  const priorityColors = {
+    High: {
+      color: "#ff8585",
+      background: "#3a2020"
+    },
+    Medium: {
+      color: "#e8c47c",
+      background: "#352e1e"
+    },
+    Low: {
+      color: "#bcbcbc",
+      background: "#292929"
+    }
+  };
+
+  applyStyles(priority, {
+    fontSize: "11px",
+    padding: "4px 8px",
+    borderRadius: "20px",
+    ...priorityColors[task.priority]
+  });
+
+  const category = createElement(
+    "span",
+    "task-category",
+    task.category
+  );
+
+  applyStyles(category, {
+    fontSize: "11px",
+    color: "#ccc",
+    background: "#292929",
+    padding: "4px 8px",
+    borderRadius: "20px"
+  });
+
+  metadata.append(priority, category);
+
+  if (task.dueDate) {
+    const isOverdue =
+      !task.completed && task.dueDate < getTodayKey();
+
+    const due = createElement(
+      "span",
+      "task-due-date",
+      `${isOverdue ? "Overdue · " : "Due · "}${formatDate(task.dueDate)}`
+    );
+
+    applyStyles(due, {
+      fontSize: "11px",
+      color: isOverdue ? "#ff8585" : "#aaa"
+    });
+
+    metadata.appendChild(due);
+  }
+
+  info.append(title, metadata);
+  item.append(checkbox, info);
+
+  if (allowActions) {
+    const actions = applyStyles(
+      createElement("div", "task-actions"),
+      {
+        display: "flex",
+        gap: "6px",
+        alignItems: "center"
+      }
+    );
+
+    const editButton = createActionButton("Edit", true);
+
+    editButton.addEventListener("click", () => {
+      editingTaskId = task.id;
+      renderTasks();
+    });
+
     const deleteButton = createElement(
       "button",
       "delete-button",
@@ -796,21 +1178,39 @@ function createTaskItem(task, allowDelete = false) {
     );
 
     deleteButton.addEventListener("click", () => {
+      const confirmed = window.confirm(
+        `Delete "${task.title}"?`
+      );
+
+      if (!confirmed) return;
+
+      const previousTasks = data.tasks;
+
       data.tasks = data.tasks.filter(
         entry => entry.id !== task.id
       );
 
-      if (saveData()) renderTasks();
+      if (!saveData()) {
+        data.tasks = previousTasks;
+        return;
+      }
+
+      if (editingTaskId === task.id) {
+        editingTaskId = null;
+      }
+
+      renderTasks();
     });
 
-    item.appendChild(deleteButton);
+    actions.append(editButton, deleteButton);
+    item.appendChild(actions);
   }
 
   return item;
 }
 
 // =========================================
-// 15. HABITS PAGE
+// 17. HABITS PAGE
 // =========================================
 
 function renderHabits() {
@@ -825,6 +1225,7 @@ function renderHabits() {
   form.className = "card";
 
   const input = document.createElement("input");
+
   input.type = "text";
   input.placeholder = "Example: Read 10 pages";
   input.maxLength = 100;
@@ -848,13 +1249,19 @@ function renderHabits() {
     const title = input.value.trim();
     if (!title) return;
 
+    const previousHabits = data.habits;
+
     data.habits.push({
       id: createId(),
       title,
       completedDates: []
     });
 
-    if (saveData()) renderHabits();
+    if (saveData()) {
+      renderHabits();
+    } else {
+      data.habits = previousHabits;
+    }
   });
 
   main.appendChild(form);
@@ -892,6 +1299,7 @@ function createHabitItem(habit, allowDelete = false) {
     habit.completedDates.includes(today);
 
   const checkbox = document.createElement("input");
+
   checkbox.type = "checkbox";
   checkbox.checked = completedToday;
 
@@ -901,6 +1309,8 @@ function createHabitItem(habit, allowDelete = false) {
   );
 
   checkbox.addEventListener("change", () => {
+    const previousDates = [...habit.completedDates];
+
     if (checkbox.checked) {
       if (!habit.completedDates.includes(today)) {
         habit.completedDates.push(today);
@@ -911,7 +1321,12 @@ function createHabitItem(habit, allowDelete = false) {
       );
     }
 
-    if (saveData()) showPage(currentPage);
+    if (saveData()) {
+      showPage(currentPage);
+    } else {
+      habit.completedDates = previousDates;
+      checkbox.checked = previousDates.includes(today);
+    }
   });
 
   const title = createElement(
@@ -934,17 +1349,30 @@ function createHabitItem(habit, allowDelete = false) {
     );
 
     deleteButton.type = "button";
+
     deleteButton.setAttribute(
       "aria-label",
       `Delete ${habit.title}`
     );
 
     deleteButton.addEventListener("click", () => {
+      const confirmed = window.confirm(
+        `Delete habit "${habit.title}"?`
+      );
+
+      if (!confirmed) return;
+
+      const previousHabits = data.habits;
+
       data.habits = data.habits.filter(
         entry => entry.id !== habit.id
       );
 
-      if (saveData()) renderHabits();
+      if (saveData()) {
+        renderHabits();
+      } else {
+        data.habits = previousHabits;
+      }
     });
 
     item.appendChild(deleteButton);
@@ -954,7 +1382,7 @@ function createHabitItem(habit, allowDelete = false) {
 }
 
 // =========================================
-// 16. BACKUP INTERFACE
+// 18. BACKUP INTERFACE
 // =========================================
 
 function renderBackupSection() {
@@ -985,9 +1413,7 @@ function renderBackupSection() {
 
   exportButton.type = "button";
 
-  exportButton.addEventListener("click", () => {
-    exportBackup();
-  });
+  exportButton.addEventListener("click", exportBackup);
 
   const importButton = createElement(
     "button",
@@ -1002,6 +1428,7 @@ function renderBackupSection() {
   fileInput.type = "file";
   fileInput.accept = ".json,application/json";
   fileInput.hidden = true;
+
   fileInput.setAttribute(
     "aria-label",
     "Choose a DAILY OS backup file"
@@ -1014,20 +1441,12 @@ function renderBackupSection() {
   fileInput.addEventListener("change", () => {
     const file = fileInput.files && fileInput.files[0];
 
-    if (file) {
-      importBackupFile(file);
-    }
+    if (file) importBackupFile(file);
 
-    // Allows selecting the same file again.
     fileInput.value = "";
   });
 
-  actions.append(
-    exportButton,
-    importButton,
-    fileInput
-  );
-
+  actions.append(exportButton, importButton, fileInput);
   backupCard.appendChild(actions);
 
   backupCard.appendChild(
@@ -1043,7 +1462,7 @@ function renderBackupSection() {
 }
 
 // =========================================
-// 17. ANALYTICS PAGE
+// 19. ANALYTICS PAGE
 // =========================================
 
 function renderAnalytics() {
@@ -1054,7 +1473,6 @@ function renderAnalytics() {
     createElement("h2", "page-title", "Analytics")
   );
 
-  // Task overview
   const taskCard = createCard("TASK OVERVIEW");
 
   const completedTasks = getCompletedTasks();
@@ -1079,7 +1497,6 @@ function renderAnalytics() {
 
   main.appendChild(taskCard);
 
-  // Habit overview
   const habitCard = createCard("HABIT OVERVIEW");
 
   const completedHabits = getCompletedHabits();
@@ -1104,7 +1521,6 @@ function renderAnalytics() {
 
   main.appendChild(habitCard);
 
-  // Total activity
   const totalCard = createCard("TOTAL ACTIVITY");
 
   totalCard.append(
@@ -1122,12 +1538,40 @@ function renderAnalytics() {
 
   main.appendChild(totalCard);
 
+  // Task priority overview
+  const priorityCard = createCard("TASK PRIORITIES");
+
+  TASK_PRIORITIES.forEach(priority => {
+    const count = data.tasks.filter(
+      task => task.priority === priority && !task.completed
+    ).length;
+
+    const row = applyStyles(
+      createElement("div", "priority-overview-row"),
+      {
+        display: "flex",
+        justifyContent: "space-between",
+        padding: "8px 0",
+        borderBottom: "1px solid #303030"
+      }
+    );
+
+    row.append(
+      createElement("span", "secondary-text", priority),
+      createElement("strong", "", String(count))
+    );
+
+    priorityCard.appendChild(row);
+  });
+
+  main.appendChild(priorityCard);
+
   // Backup section
   renderBackupSection();
 }
 
 // =========================================
-// 18. APP STATUS
+// 20. APP STATUS
 // =========================================
 
-console.log("DAILY OS: Script loaded.");
+console.log("DAILY OS: Version 2.0 script loaded.");
