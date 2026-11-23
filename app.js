@@ -1,7 +1,7 @@
 
 /* =========================================
    DAILY OS — Core App
-   Version 1.2
+   Version 1.3
    Tasks | Habits | Analytics
    ========================================= */
 
@@ -11,14 +11,10 @@
 // 1. CONFIGURATION
 // =========================================
 
-const STORAGE_KEY = "daily-os-data";
+// IMPORTANT: Declare pages before starting the app.
+const pages = ["Today", "Tasks", "Habits", "Analytics"];
 
-const pages = [
-  "Today",
-  "Tasks",
-  "Habits",
-  "Analytics"
-];
+const STORAGE_KEY = "daily-os-data";
 
 let data = {
   tasks: [],
@@ -31,7 +27,7 @@ let navigation = null;
 let currentPage = "Today";
 
 // =========================================
-// 2. DATE & ID HELPERS
+// 2. DATE AND ID HELPERS
 // =========================================
 
 function getTodayKey() {
@@ -60,20 +56,20 @@ function createId() {
 // =========================================
 
 function loadData() {
+  const emptyData = {
+    tasks: [],
+    habits: []
+  };
+
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
 
-    if (!saved) {
-      return {
-        tasks: [],
-        habits: []
-      };
-    }
+    if (!saved) return emptyData;
 
     const parsed = JSON.parse(saved);
 
     if (!parsed || typeof parsed !== "object") {
-      throw new Error("Invalid saved data.");
+      return emptyData;
     }
 
     const tasks = Array.isArray(parsed.tasks)
@@ -110,12 +106,8 @@ function loadData() {
     return { tasks, habits };
 
   } catch (error) {
-    console.error("DAILY OS: Data loading error:", error);
-
-    return {
-      tasks: [],
-      habits: []
-    };
+    console.error("DAILY OS: Could not load data:", error);
+    return emptyData;
   }
 }
 
@@ -129,12 +121,8 @@ function saveData() {
     return true;
 
   } catch (error) {
-    console.error("DAILY OS: Data saving error:", error);
-
-    showMessage(
-      "Unable to save data. Please check browser storage."
-    );
-
+    console.error("DAILY OS: Could not save data:", error);
+    alert("Unable to save data. Please check browser storage.");
     return false;
   }
 }
@@ -157,123 +145,70 @@ function createElement(tag, className, text) {
   return element;
 }
 
-function clearElement(element) {
-  element.replaceChildren();
-}
-
-function showMessage(message) {
-  if (!main) return;
-
-  const messageElement = createElement(
-    "p",
-    "secondary-text",
-    message
-  );
-
-  messageElement.setAttribute("role", "status");
-  main.prepend(messageElement);
-}
-
 function createCard(title) {
   const card = createElement("section", "card");
-
-  const heading = createElement(
-    "h2",
-    "section-title",
-    title
-  );
+  const heading = createElement("h2", "section-title", title);
 
   card.appendChild(heading);
 
   return card;
 }
 
-function createButton(text, className, onClick) {
-  const button = createElement(
-    "button",
-    className,
-    text
-  );
-
-  button.type = "button";
-  button.addEventListener("click", onClick);
-
-  return button;
-}
-
 function getCompletedTasks() {
-  return data.tasks.filter(
-    task => task.completed
-  ).length;
+  return data.tasks.filter(task => task.completed).length;
 }
 
 function getCompletedHabits() {
   const today = getTodayKey();
 
-  return data.habits.filter(
-    habit => habit.completedDates.includes(today)
+  return data.habits.filter(habit =>
+    habit.completedDates.includes(today)
   ).length;
 }
 
 // =========================================
-// 5. ERROR HANDLING
+// 5. ERROR DISPLAY
 // =========================================
 
 function showStartupError(error) {
   console.error("DAILY OS STARTUP ERROR:", error);
 
-  const container = main || document.body;
+  if (!main) {
+    const fallback = createElement("main");
+    document.body.appendChild(fallback);
+    main = fallback;
+  }
 
-  clearElement(container);
+  main.replaceChildren();
 
-  const errorCard = createElement("section", "card");
-
-  const title = createElement(
-    "h2",
-    "section-title",
-    "DAILY OS Startup Error"
-  );
+  const card = createCard("DAILY OS Startup Error");
 
   const message = createElement(
     "p",
     "secondary-text",
-    error.name + ": " + error.message
+    `${error.name}: ${error.message}`
   );
-
-  message.style.cssText =
-    "margin-top:12px;overflow-wrap:anywhere;";
 
   const instruction = createElement(
     "p",
     "secondary-text",
-    "Please share this error message with ChatGPT."
+    "Please send this error message to ChatGPT."
   );
 
-  instruction.style.marginTop = "12px";
-
-  errorCard.append(title, message, instruction);
-  container.appendChild(errorCard);
+  card.append(message, instruction);
+  main.appendChild(card);
 }
 
-function showFatalError(message) {
-  const errorBox = createElement("section", "card");
+function showSetupError(message) {
+  console.error("DAILY OS SETUP ERROR:", message);
 
-  const title = createElement(
-    "h2",
-    "section-title",
-    "DAILY OS Setup Error"
+  const card = createCard("DAILY OS Setup Error");
+
+  card.appendChild(
+    createElement("p", "secondary-text", message)
   );
 
-  const description = createElement(
-    "p",
-    "secondary-text",
-    message
-  );
-
-  errorBox.append(title, description);
-  document.body.appendChild(errorBox);
-
-  console.error("DAILY OS:", message);
+  document.body.appendChild(card);
 }
 
 // =========================================
@@ -289,34 +224,27 @@ function startApp() {
     navigation = document.getElementById("bottom-navigation");
 
     if (!header || !main || !navigation) {
-      showFatalError(
-        "Required HTML elements are missing. " +
-        "Check app-header, main-content, and " +
-        "bottom-navigation in index.html."
+      showSetupError(
+        "Missing HTML element. Check these IDs in index.html: " +
+        "app-header, main-content, bottom-navigation."
       );
-
       return;
     }
 
     data = loadData();
 
-    console.log("DAILY OS: Data loaded.");
-
     renderHeader();
-    console.log("DAILY OS: Header rendered.");
-
     renderNavigation();
-    console.log("DAILY OS: Navigation rendered.");
-
     showPage("Today");
-    console.log("DAILY OS: Today page rendered.");
+
+    console.log("DAILY OS: App started successfully.");
 
   } catch (error) {
     showStartupError(error);
   }
 }
 
-// Start after HTML is ready
+// Start only after the HTML document is ready.
 if (document.readyState === "loading") {
   document.addEventListener(
     "DOMContentLoaded",
@@ -332,13 +260,9 @@ if (document.readyState === "loading") {
 // =========================================
 
 function renderHeader() {
-  clearElement(header);
+  header.replaceChildren();
 
-  const wrapper = createElement(
-    "div",
-    "header-content"
-  );
-
+  const wrapper = createElement("div", "header-content");
   const titleGroup = createElement("div");
 
   const eyebrow = createElement(
@@ -355,14 +279,14 @@ function renderHeader() {
 
   titleGroup.append(eyebrow, title);
 
-  const date = createElement(
+  const dateElement = createElement(
     "div",
     "header-date"
   );
 
-  date.id = "header-date";
+  dateElement.id = "header-date";
 
-  date.textContent = new Date().toLocaleDateString(
+  dateElement.textContent = new Date().toLocaleDateString(
     "en-US",
     {
       weekday: "short",
@@ -371,7 +295,7 @@ function renderHeader() {
     }
   );
 
-  wrapper.append(titleGroup, date);
+  wrapper.append(titleGroup, dateElement);
   header.appendChild(wrapper);
 }
 
@@ -380,47 +304,49 @@ function renderHeader() {
 // =========================================
 
 function renderNavigation() {
-  clearElement(navigation);
+  navigation.replaceChildren();
 
   pages.forEach(page => {
-    const button = createButton(
-      page,
-      "nav-item",
-      () => showPage(page)
-    );
+    const button = document.createElement("button");
 
+    button.type = "button";
+    button.className = "nav-item";
+    button.textContent = page;
     button.dataset.page = page;
+
+    button.addEventListener("click", () => {
+      showPage(page);
+    });
 
     navigation.appendChild(button);
   });
 }
 
 function showPage(page) {
-  try {
-    if (!pages.includes(page)) {
-      throw new Error("Unknown page: " + page);
-    }
+  if (!pages.includes(page)) {
+    console.error("DAILY OS: Unknown page:", page);
+    return;
+  }
 
+  try {
     currentPage = page;
 
-    navigation
-      .querySelectorAll(".nav-item")
-      .forEach(button => {
-        const active = button.dataset.page === page;
+    navigation.querySelectorAll(".nav-item").forEach(button => {
+      const isActive = button.dataset.page === page;
 
-        button.classList.toggle("active", active);
+      button.classList.toggle("active", isActive);
 
-        if (active) {
-          button.setAttribute("aria-current", "page");
-        } else {
-          button.removeAttribute("aria-current");
-        }
-      });
+      if (isActive) {
+        button.setAttribute("aria-current", "page");
+      } else {
+        button.removeAttribute("aria-current");
+      }
+    });
 
     if (page === "Today") renderToday();
-    if (page === "Tasks") renderTasks();
-    if (page === "Habits") renderHabits();
-    if (page === "Analytics") renderAnalytics();
+    else if (page === "Tasks") renderTasks();
+    else if (page === "Habits") renderHabits();
+    else if (page === "Analytics") renderAnalytics();
 
   } catch (error) {
     showStartupError(error);
@@ -432,25 +358,11 @@ function showPage(page) {
 // =========================================
 
 function renderToday() {
-  clearElement(main);
+  main.replaceChildren();
 
-  main.appendChild(
-    createElement(
-      "p",
-      "eyebrow",
-      "FOCUS ON WHAT MATTERS"
-    )
-  );
-
-  main.appendChild(
-    createElement(
-      "h2",
-      "page-title",
-      "Make today count."
-    )
-  );
-
-  main.appendChild(
+  main.append(
+    createElement("p", "eyebrow", "FOCUS ON WHAT MATTERS"),
+    createElement("h2", "page-title", "Make today count."),
     createElement(
       "p",
       "secondary-text",
@@ -459,17 +371,14 @@ function renderToday() {
   );
 
   // Daily progress
-  const totalItems =
-    data.tasks.length + data.habits.length;
+  const totalItems = data.tasks.length + data.habits.length;
 
   const completedItems =
     getCompletedTasks() + getCompletedHabits();
 
   const percentage = totalItems === 0
     ? 0
-    : Math.round(
-        (completedItems / totalItems) * 100
-      );
+    : Math.round((completedItems / totalItems) * 100);
 
   const progressCard = createCard("DAILY PROGRESS");
 
@@ -481,23 +390,21 @@ function renderToday() {
     )
   );
 
-  const progressTrack = createElement(
-    "div",
-    "progress-track"
-  );
+  const track = createElement("div", "progress-track");
+  const bar = createElement("div", "progress-bar");
 
-  const progressBar = createElement(
-    "div",
-    "progress-bar"
-  );
+  track.style.cssText =
+    "height:8px;background:#303030;border-radius:10px;overflow:hidden;";
 
-  progressBar.style.width = percentage + "%";
+  bar.style.cssText =
+    "height:100%;background:#fff;border-radius:10px;transition:width .2s ease;";
 
-  progressTrack.appendChild(progressBar);
+  bar.style.width = `${percentage}%`;
 
-  progressCard.appendChild(progressTrack);
+  track.appendChild(bar);
 
-  progressCard.appendChild(
+  progressCard.append(
+    track,
     createElement(
       "p",
       "secondary-text",
@@ -507,7 +414,7 @@ function renderToday() {
 
   main.appendChild(progressCard);
 
-  // Tasks preview
+  // Task preview
   const taskCard = createCard("TODAY'S TASKS");
 
   const pendingTasks = data.tasks.filter(
@@ -534,7 +441,7 @@ function renderToday() {
 
   main.appendChild(taskCard);
 
-  // Habits preview
+  // Habit preview
   const habitCard = createCard("DAILY HABITS");
 
   if (data.habits.length === 0) {
@@ -563,13 +470,10 @@ function renderToday() {
 // =========================================
 
 function renderTasks() {
-  clearElement(main);
+  main.replaceChildren();
 
-  main.appendChild(
-    createElement("p", "eyebrow", "GET THINGS DONE")
-  );
-
-  main.appendChild(
+  main.append(
+    createElement("p", "eyebrow", "GET THINGS DONE"),
     createElement("h2", "page-title", "Tasks")
   );
 
@@ -577,7 +481,6 @@ function renderTasks() {
   form.className = "card";
 
   const input = document.createElement("input");
-
   input.type = "text";
   input.placeholder = "Write a new task...";
   input.maxLength = 120;
@@ -599,7 +502,6 @@ function renderTasks() {
     event.preventDefault();
 
     const title = input.value.trim();
-
     if (!title) return;
 
     data.tasks.push({
@@ -609,9 +511,7 @@ function renderTasks() {
       createdAt: getTodayKey()
     });
 
-    if (saveData()) {
-      renderTasks();
-    }
+    if (saveData()) renderTasks();
   });
 
   main.appendChild(form);
@@ -645,21 +545,18 @@ function createTaskItem(task, allowDelete = false) {
   const item = createElement("div", "task-item");
 
   const checkbox = document.createElement("input");
-
   checkbox.type = "checkbox";
   checkbox.checked = task.completed;
 
   checkbox.setAttribute(
     "aria-label",
-    "Mark " + task.title + " as completed"
+    `Mark ${task.title} as ${task.completed ? "incomplete" : "complete"}`
   );
 
   checkbox.addEventListener("change", () => {
     task.completed = checkbox.checked;
 
-    if (saveData()) {
-      showPage(currentPage);
-    }
+    if (saveData()) showPage(currentPage);
   });
 
   const title = createElement(
@@ -675,24 +572,25 @@ function createTaskItem(task, allowDelete = false) {
   item.append(checkbox, title);
 
   if (allowDelete) {
-    const deleteButton = createButton(
-      "×",
+    const deleteButton = createElement(
+      "button",
       "delete-button",
-      () => {
-        data.tasks = data.tasks.filter(
-          entry => entry.id !== task.id
-        );
-
-        if (saveData()) {
-          renderTasks();
-        }
-      }
+      "×"
     );
 
+    deleteButton.type = "button";
     deleteButton.setAttribute(
       "aria-label",
-      "Delete " + task.title
+      `Delete ${task.title}`
     );
+
+    deleteButton.addEventListener("click", () => {
+      data.tasks = data.tasks.filter(
+        entry => entry.id !== task.id
+      );
+
+      if (saveData()) renderTasks();
+    });
 
     item.appendChild(deleteButton);
   }
@@ -705,17 +603,10 @@ function createTaskItem(task, allowDelete = false) {
 // =========================================
 
 function renderHabits() {
-  clearElement(main);
+  main.replaceChildren();
 
-  main.appendChild(
-    createElement(
-      "p",
-      "eyebrow",
-      "BUILD YOUR ROUTINE"
-    )
-  );
-
-  main.appendChild(
+  main.append(
+    createElement("p", "eyebrow", "BUILD YOUR ROUTINE"),
     createElement("h2", "page-title", "Habits")
   );
 
@@ -723,7 +614,6 @@ function renderHabits() {
   form.className = "card";
 
   const input = document.createElement("input");
-
   input.type = "text";
   input.placeholder = "Example: Read 10 pages";
   input.maxLength = 100;
@@ -745,7 +635,6 @@ function renderHabits() {
     event.preventDefault();
 
     const title = input.value.trim();
-
     if (!title) return;
 
     data.habits.push({
@@ -754,9 +643,7 @@ function renderHabits() {
       completedDates: []
     });
 
-    if (saveData()) {
-      renderHabits();
-    }
+    if (saveData()) renderHabits();
   });
 
   main.appendChild(form);
@@ -788,21 +675,18 @@ function renderHabits() {
 
 function createHabitItem(habit, allowDelete = false) {
   const item = createElement("div", "habit-item");
-
-  const checkbox = document.createElement("input");
-
-  checkbox.type = "checkbox";
-
   const today = getTodayKey();
 
   const completedToday =
     habit.completedDates.includes(today);
 
+  const checkbox = document.createElement("input");
+  checkbox.type = "checkbox";
   checkbox.checked = completedToday;
 
   checkbox.setAttribute(
     "aria-label",
-    "Mark " + habit.title + " as completed today"
+    `Mark ${habit.title} as ${completedToday ? "not done" : "done"} today`
   );
 
   checkbox.addEventListener("change", () => {
@@ -811,15 +695,12 @@ function createHabitItem(habit, allowDelete = false) {
         habit.completedDates.push(today);
       }
     } else {
-      habit.completedDates =
-        habit.completedDates.filter(
-          date => date !== today
-        );
+      habit.completedDates = habit.completedDates.filter(
+        date => date !== today
+      );
     }
 
-    if (saveData()) {
-      showPage(currentPage);
-    }
+    if (saveData()) showPage(currentPage);
   });
 
   const title = createElement(
@@ -835,24 +716,25 @@ function createHabitItem(habit, allowDelete = false) {
   item.append(checkbox, title);
 
   if (allowDelete) {
-    const deleteButton = createButton(
-      "×",
+    const deleteButton = createElement(
+      "button",
       "delete-button",
-      () => {
-        data.habits = data.habits.filter(
-          entry => entry.id !== habit.id
-        );
-
-        if (saveData()) {
-          renderHabits();
-        }
-      }
+      "×"
     );
 
+    deleteButton.type = "button";
     deleteButton.setAttribute(
       "aria-label",
-      "Delete " + habit.title
+      `Delete ${habit.title}`
     );
+
+    deleteButton.addEventListener("click", () => {
+      data.habits = data.habits.filter(
+        entry => entry.id !== habit.id
+      );
+
+      if (saveData()) renderHabits();
+    });
 
     item.appendChild(deleteButton);
   }
@@ -865,17 +747,10 @@ function createHabitItem(habit, allowDelete = false) {
 // =========================================
 
 function renderAnalytics() {
-  clearElement(main);
+  main.replaceChildren();
 
-  main.appendChild(
-    createElement(
-      "p",
-      "eyebrow",
-      "MEASURE YOUR PROGRESS"
-    )
-  );
-
-  main.appendChild(
+  main.append(
+    createElement("p", "eyebrow", "MEASURE YOUR PROGRESS"),
     createElement("h2", "page-title", "Analytics")
   );
 
@@ -887,19 +762,14 @@ function renderAnalytics() {
 
   const taskPercentage = totalTasks === 0
     ? 0
-    : Math.round(
-        (completedTasks / totalTasks) * 100
-      );
+    : Math.round((completedTasks / totalTasks) * 100);
 
-  taskCard.appendChild(
+  taskCard.append(
     createElement(
       "p",
       "progress-text",
       `${completedTasks} / ${totalTasks} tasks completed`
-    )
-  );
-
-  taskCard.appendChild(
+    ),
     createElement(
       "p",
       "secondary-text",
@@ -917,19 +787,14 @@ function renderAnalytics() {
 
   const habitPercentage = totalHabits === 0
     ? 0
-    : Math.round(
-        (completedHabits / totalHabits) * 100
-      );
+    : Math.round((completedHabits / totalHabits) * 100);
 
-  habitCard.appendChild(
+  habitCard.append(
     createElement(
       "p",
       "progress-text",
       `${completedHabits} / ${totalHabits} habits completed today`
-    )
-  );
-
-  habitCard.appendChild(
+    ),
     createElement(
       "p",
       "secondary-text",
@@ -942,18 +807,12 @@ function renderAnalytics() {
   // Total activity
   const totalCard = createCard("TOTAL ACTIVITY");
 
-  const totalItems =
-    data.tasks.length + data.habits.length;
-
-  totalCard.appendChild(
+  totalCard.append(
     createElement(
       "p",
       "progress-text",
-      `${totalItems} items`
-    )
-  );
-
-  totalCard.appendChild(
+      `${data.tasks.length + data.habits.length} items`
+    ),
     createElement(
       "p",
       "secondary-text",
@@ -965,7 +824,7 @@ function renderAnalytics() {
 }
 
 // =========================================
-// 13. APP READY
+// 13. APP STATUS
 // =========================================
 
-console.log("DAILY OS: App script loaded.");
+console.log("DAILY OS: Script loaded.");
