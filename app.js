@@ -1,792 +1,941 @@
-/* =========================================================
-   DAILY OS — Complete Personal Productivity System
-   Version 3.0
-   Today | Tasks | Habits | Calendar | Analytics | Backup
-   ========================================================= */
 "use strict";
 
-/* ----------------------------- CONFIG ----------------------------- */
-const APP_VERSION = "3.0";
+/* =========================================================
+   DAILY OS 3.0 FINAL
+   Storage key is intentionally preserved for existing data.
+========================================================= */
+
 const STORAGE_KEY = "daily-os-data";
-const BACKUP_VERSION = 3;
-const PAGES = ["Today", "Tasks", "Habits", "Calendar", "Analytics"];
-const PRIORITIES = ["High", "Medium", "Low"];
-const CATEGORIES = ["Personal", "Study", "Trading", "Basketball", "Health"];
 
-let data = { tasks: [], habits: [] };
-let headerEl, mainEl, navEl;
-let currentPage = "Today";
-let editingTaskId = null;
-let editingHabitId = null;
-let taskFilters = { search: "", category: "All", priority: "All", status: "Active" };
-let calendarMode = "Month";
-let calendarCursor = new Date();
-let selectedCalendarDate = todayKey();
+const $ = (selector, root = document) => root.querySelector(selector);
+const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 
-/* ----------------------------- DATE HELPERS ----------------------------- */
-function todayKey() {
+const todayKey = () => {
   const d = new Date();
-  return dateKeyFromParts(d.getFullYear(), d.getMonth() + 1, d.getDate());
-}
-function dateKeyFromParts(y, m, d) {
-  return `${String(y).padStart(4, "0")}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-}
-function isValidDateKey(value) {
-  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-  const [y, m, d] = value.split("-").map(Number);
-  const date = new Date(y, m - 1, d);
-  return date.getFullYear() === y && date.getMonth() === m - 1 && date.getDate() === d;
-}
-function dateFromKey(key) {
-  if (!isValidDateKey(key)) return new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+
+const dateKey = (date) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+
+const parseDate = (key) => {
+  if (!key || !/^\d{4}-\d{2}-\d{2}$/.test(key)) return null;
   const [y, m, d] = key.split("-").map(Number);
-  return new Date(y, m - 1, d, 12, 0, 0, 0);
-}
-function keyFromDate(date) {
-  return dateKeyFromParts(date.getFullYear(), date.getMonth() + 1, date.getDate());
-}
-function addDays(key, amount) {
-  const d = dateFromKey(key);
-  d.setDate(d.getDate() + amount);
-  return keyFromDate(d);
-}
-function formatDate(key, options = { day: "numeric", month: "short", year: "numeric" }) {
-  if (!isValidDateKey(key)) return "No date";
-  return dateFromKey(key).toLocaleDateString(undefined, options);
-}
-function monthTitle(date) {
-  return date.toLocaleDateString(undefined, { month: "long", year: "numeric" });
-}
-function startOfWeek(key) {
-  const d = dateFromKey(key);
-  const day = (d.getDay() + 6) % 7;
-  d.setDate(d.getDate() - day);
-  return keyFromDate(d);
-}
-function daysInMonth(year, monthIndex) {
-  return new Date(year, monthIndex + 1, 0).getDate();
-}
-function createId() {
-  if (window.crypto && typeof window.crypto.randomUUID === "function") return window.crypto.randomUUID();
-  return `id-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const date = new Date(y, m - 1, d);
+  return date.getFullYear() === y && date.getMonth() === m - 1 && date.getDate() === d
+    ? date : null;
+};
+
+const addDays = (key, amount) => {
+  const date = parseDate(key);
+  if (!date) return key;
+  date.setDate(date.getDate() + amount);
+  return dateKey(date);
+};
+
+const formatDate = (key, options = { day: "numeric", month: "short", year: "numeric" }) => {
+  const date = parseDate(key);
+  return date ? date.toLocaleDateString(undefined, options) : "No date";
+};
+
+const uid = () =>
+  (window.crypto && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+const escapeHTML = (value) =>
+  String(value ?? "").replace(/[&<>"']/g, char => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  })[char]);
+
+const safeArray = value => Array.isArray(value) ? value : [];
+
+function normalizeTask(task) {
+  const createdAt = task.createdAt || task.date || todayKey();
+  return {
+    id: String(task.id || uid()),
+    title: String(task.title || task.name || "Untitled task"),
+    priority: ["High", "Medium", "Low"].includes(task.priority) ? task.priority : "Medium",
+    category: ["Personal", "Study", "Trading", "Basketball", "Health"].includes(task.category)
+      ? task.category : "Personal",
+    dueDate: task.dueDate || task.dateDue || "",
+    completed: Boolean(task.completed),
+    createdAt,
+    completedAt: task.completedAt || (task.completed ? createdAt : null)
+  };
 }
 
-/* ----------------------------- DATA MODEL ----------------------------- */
-function normalizeTask(task) {
-  return {
-    id: typeof task.id === "string" && task.id ? task.id : createId(),
-    title: String(task.title || "").trim(),
-    completed: task.completed === true,
-    createdAt: isValidDateKey(task.createdAt) ? task.createdAt : todayKey(),
-    completedAt: isValidDateKey(task.completedAt) ? task.completedAt : "",
-    priority: PRIORITIES.includes(task.priority) ? task.priority : "Medium",
-    category: CATEGORIES.includes(task.category) ? task.category : "Personal",
-    dueDate: isValidDateKey(task.dueDate) ? task.dueDate : ""
-  };
-}
 function normalizeHabit(habit) {
-  const dates = Array.isArray(habit.completedDates) ? habit.completedDates : [];
+  const history = Array.isArray(habit.history)
+    ? habit.history.filter(value => typeof value === "string" && parseDate(value))
+    : [];
+
+  // Migrate common legacy completion fields without discarding history.
+  if (habit.completed === true && !history.includes(todayKey())) {
+    history.push(todayKey());
+  }
+
   return {
-    id: typeof habit.id === "string" && habit.id ? habit.id : createId(),
-    title: String(habit.title || "").trim(),
-    createdAt: isValidDateKey(habit.createdAt) ? habit.createdAt : todayKey(),
-    completedDates: [...new Set(dates.filter(isValidDateKey))]
+    id: String(habit.id || uid()),
+    title: String(habit.title || habit.name || "Untitled habit"),
+    createdAt: habit.createdAt || todayKey(),
+    history: [...new Set(history)].sort()
   };
 }
-function normalizeData(raw) {
-  if (!raw || typeof raw !== "object") throw new Error("The data file has an invalid structure.");
-  const tasks = Array.isArray(raw.tasks) ? raw.tasks.filter(x => x && typeof x.title === "string" && x.title.trim()).map(normalizeTask) : [];
-  const habits = Array.isArray(raw.habits) ? raw.habits.filter(x => x && typeof x.title === "string" && x.title.trim()).map(normalizeHabit) : [];
-  return { tasks, habits };
-}
+
 function loadData() {
   try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (!saved) return { tasks: [], habits: [] };
-    const parsed = JSON.parse(saved);
-    return normalizeData(parsed);
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return { tasks: [], habits: [] };
+
+    const parsed = JSON.parse(raw);
+    return {
+      tasks: safeArray(parsed.tasks).map(normalizeTask),
+      habits: safeArray(parsed.habits).map(normalizeHabit)
+    };
   } catch (error) {
-    console.error("DAILY OS: Data load failed; original local data was left untouched.", error);
-    showToast("Could not read saved data. The stored data has not been deleted.", "error");
+    console.error("DAILY OS: Could not read saved data.", error);
     return { tasks: [], habits: [] };
   }
 }
+
+let data = loadData();
+let currentPage = "today";
+let calendarMode = "month";
+let calendarDate = new Date();
+let selectedCalendarDate = todayKey();
+let toastTimer = null;
+
 function saveData() {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
     return true;
   } catch (error) {
-    console.error("DAILY OS: Save failed.", error);
-    showToast("Could not save. Check available browser storage.", "error");
+    console.error("DAILY OS: Could not save data.", error);
+    showToast("Could not save data. Check browser storage.");
     return false;
   }
 }
 
-/* ----------------------------- DOM HELPERS ----------------------------- */
-function el(tag, className = "", text = "") {
-  const node = document.createElement(tag);
-  if (className) node.className = className;
-  if (text !== "") node.textContent = text;
-  return node;
-}
-function button(text, className = "button button-secondary", onClick, type = "button") {
-  const node = el("button", className, text);
-  node.type = type;
-  if (onClick) node.addEventListener("click", onClick);
-  return node;
-}
-function card(title, subtitle = "") {
-  const node = el("section", "card");
-  if (title) {
-    const head = el("div", "card-heading");
-    head.appendChild(el("h3", "section-title", title));
-    if (subtitle) head.appendChild(el("p", "muted small", subtitle));
-    node.appendChild(head);
-  }
-  return node;
-}
-function field(labelText, control) {
-  const wrap = el("label", "field");
-  wrap.append(el("span", "field-label", labelText), control);
-  return wrap;
-}
-function input(type, value = "", placeholder = "") {
-  const node = document.createElement("input");
-  node.type = type;
-  node.value = value;
-  node.placeholder = placeholder;
-  node.className = "control";
-  return node;
-}
-function select(options, value) {
-  const node = document.createElement("select");
-  node.className = "control";
-  options.forEach(option => {
-    const item = document.createElement("option");
-    item.value = option;
-    item.textContent = option;
-    node.appendChild(item);
-  });
-  node.value = value;
-  return node;
-}
-function pageIntro(eyebrow, title, description) {
-  const wrap = el("div", "page-intro");
-  wrap.append(el("p", "eyebrow", eyebrow), el("h2", "page-title", title));
-  if (description) wrap.appendChild(el("p", "muted page-description", description));
-  mainEl.appendChild(wrap);
-}
-function showToast(message, type = "success") {
-  let toast = document.getElementById("app-toast");
-  if (!toast) {
-    toast = el("div");
-    toast.id = "app-toast";
-    toast.setAttribute("role", "status");
-    document.body.appendChild(toast);
-  }
-  toast.className = `toast ${type}`;
+function showToast(message) {
+  const toast = $("#toast");
+  if (!toast) return;
   toast.textContent = message;
-  clearTimeout(showToast.timer);
-  showToast.timer = setTimeout(() => toast.classList.remove("visible"), 2600);
-  toast.classList.add("visible");
-}
-function emptyState(title, text) {
-  const wrap = el("div", "empty-state");
-  wrap.append(el("strong", "", title), el("p", "muted small", text));
-  return wrap;
-}
-function progressBar(percent) {
-  const track = el("div", "progress-track");
-  const fill = el("div", "progress-fill");
-  fill.style.width = `${Math.max(0, Math.min(100, percent))}%`;
-  track.appendChild(fill);
-  return track;
-}
-function safeAppend(parent, ...children) {
-  children.filter(Boolean).forEach(child => parent.appendChild(child));
+  toast.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toast.classList.remove("show"), 2300);
 }
 
-/* ----------------------------- COUNTS / METRICS ----------------------------- */
-function completedTasksCount() {
-  return data.tasks.filter(task => task.completed).length;
-}
-function completedHabitsCount(key = todayKey()) {
-  return data.habits.filter(habit => habit.completedDates.includes(key)).length;
-}
-function habitStreak(habit) {
-  let cursor = todayKey();
-  if (!habit.completedDates.includes(cursor)) cursor = addDays(cursor, -1);
-  let count = 0;
-  while (habit.completedDates.includes(cursor)) {
-    count += 1;
-    cursor = addDays(cursor, -1);
-  }
-  return count;
-}
-function taskIsOverdue(task) {
-  return !!task.dueDate && !task.completed && task.dueDate < todayKey();
-}
-
-/* ----------------------------- HEADER / NAV ----------------------------- */
-function renderHeader() {
-  headerEl.replaceChildren();
-  const left = el("div", "brand-lockup");
-  left.append(el("p", "eyebrow", "YOUR PERSONAL SYSTEM"), el("h1", "brand-title", "DAILY OS"));
-  const right = el("div", "header-right");
-  right.append(el("span", "header-date", formatDate(todayKey(), { weekday: "short", month: "short", day: "numeric" })));
-  headerEl.append(left, right);
-}
-function renderNavigation() {
-  navEl.replaceChildren();
-  const labels = {
-    Today: "Today",
-    Tasks: "Tasks",
-    Habits: "Habits",
-    Calendar: "Calendar",
-    Analytics: "Analytics"
-  };
-  PAGES.forEach(page => {
-    const b = button(labels[page], "nav-item", () => showPage(page));
-    b.dataset.page = page;
-    b.setAttribute("aria-label", page);
-    navEl.appendChild(b);
-  });
-}
-function showPage(page) {
-  if (!PAGES.includes(page)) return;
+function setPage(page) {
   currentPage = page;
-  if (page !== "Tasks") editingTaskId = null;
-  if (page !== "Habits") editingHabitId = null;
-  navEl.querySelectorAll(".nav-item").forEach(item => {
-    const active = item.dataset.page === page;
-    item.classList.toggle("active", active);
-    if (active) item.setAttribute("aria-current", "page");
-    else item.removeAttribute("aria-current");
-  });
-  try {
-    if (page === "Today") renderToday();
-    if (page === "Tasks") renderTasks();
-    if (page === "Habits") renderHabits();
-    if (page === "Calendar") renderCalendar();
-    if (page === "Analytics") renderAnalytics();
-  } catch (error) {
-    console.error("DAILY OS render error:", error);
-    mainEl.replaceChildren();
-    const c = card("Something went wrong");
-    c.appendChild(el("p", "muted", `${error.name}: ${error.message}`));
-    mainEl.appendChild(c);
-  }
-}
-
-/* ----------------------------- TASK COMPONENT ----------------------------- */
-function makeTaskRow(task, actions = true) {
-  const row = el("article", `task-row${task.completed ? " is-complete" : ""}`);
-  const check = input("checkbox");
-  check.checked = task.completed;
-  check.className = "check-control";
-  check.setAttribute("aria-label", `Complete task: ${task.title}`);
-  check.addEventListener("change", () => {
-    const old = task.completed;
-    task.completed = check.checked;
-    task.completedAt = check.checked ? todayKey() : "";
-    if (saveData()) showPage(currentPage);
-    else task.completed = old;
-  });
-  const body = el("div", "task-row-body");
-  body.appendChild(el("div", "task-row-title", task.title));
-  const meta = el("div", "meta-line");
-  const p = el("span", `pill priority-${task.priority.toLowerCase()}`, task.priority);
-  const c = el("span", "pill pill-neutral", task.category);
-  meta.append(p, c);
-  if (task.dueDate) {
-    const dueLabel = taskIsOverdue(task) ? `Overdue · ${formatDate(task.dueDate)}` : `Due · ${formatDate(task.dueDate)}`;
-    meta.appendChild(el("span", `due-label${taskIsOverdue(task) ? " overdue" : ""}`, dueLabel));
-  }
-  body.appendChild(meta);
-  row.append(check, body);
-  if (actions) {
-    const actionWrap = el("div", "row-actions");
-    actionWrap.append(
-      button("Edit", "text-button", () => { editingTaskId = task.id; renderTasks(); }),
-      button("Delete", "text-button danger-text", () => {
-        if (!confirm(`Delete "${task.title}"?`)) return;
-        const previous = data.tasks;
-        data.tasks = data.tasks.filter(item => item.id !== task.id);
-        if (saveData()) { showToast("Task deleted."); renderTasks(); }
-        else data.tasks = previous;
-      })
-    );
-    row.appendChild(actionWrap);
-  }
-  return row;
-}
-
-/* ----------------------------- TODAY ----------------------------- */
-function renderToday() {
-  mainEl.replaceChildren();
-  pageIntro("FOCUS ON WHAT MATTERS", "Make today count.", "Small actions. Consistent progress.");
-  const total = data.tasks.length + data.habits.length;
-  const done = completedTasksCount() + completedHabitsCount();
-  const pct = total ? Math.round(done / total * 100) : 0;
-  const summary = card("DAILY PROGRESS", `${formatDate(todayKey(), { weekday: "long", month: "long", day: "numeric" })}`);
-  const metric = el("div", "progress-summary");
-  metric.append(el("strong", "progress-number", `${pct}%`), el("span", "muted", `${done} of ${total} items complete`));
-  summary.append(metric, progressBar(pct));
-  const stats = el("div", "mini-stats");
-  stats.append(
-    miniStat("OPEN TASKS", String(data.tasks.filter(t => !t.completed).length)),
-    miniStat("HABITS DONE", `${completedHabitsCount()}/${data.habits.length}`),
-    miniStat("OVERDUE", String(data.tasks.filter(taskIsOverdue).length))
+  $$(".nav-link").forEach(button =>
+    button.classList.toggle("active", button.dataset.page === page)
   );
-  summary.appendChild(stats);
-  mainEl.appendChild(summary);
+  $("#sidebar").classList.remove("open");
+  render();
+}
 
-  const tasksCard = card("TODAY'S FOCUS", "Your next actions");
-  const todayTasks = data.tasks.filter(t => !t.completed && (!t.dueDate || t.dueDate <= todayKey())).slice(0, 5);
-  if (!todayTasks.length) tasksCard.appendChild(emptyState("Clear space.", "No tasks due today. Add a task or enjoy the breathing room."));
-  else todayTasks.forEach(task => tasksCard.appendChild(makeTaskRow(task, false)));
-  tasksCard.appendChild(button("View all tasks", "button button-secondary full-button", () => showPage("Tasks")));
-  mainEl.appendChild(tasksCard);
+function updateHeader() {
+  $("#header-date").textContent = new Date().toLocaleDateString(undefined, {
+    weekday: "long", day: "numeric", month: "long", year: "numeric"
+  });
+}
 
-  const habitsCard = card("DAILY HABITS", "Consistency is built one day at a time");
-  if (!data.habits.length) habitsCard.appendChild(emptyState("Start small.", "Add one habit you want to make consistent."));
-  else data.habits.forEach(habit => habitsCard.appendChild(makeHabitRow(habit, false)));
-  habitsCard.appendChild(button("Manage habits", "button button-secondary full-button", () => showPage("Habits")));
-  mainEl.appendChild(habitsCard);
+function pageHeading(title, subtitle, action = "") {
+  return `
+    <div class="page-heading">
+      <div>
+        <div class="eyebrow">DAILY OS / ${escapeHTML(currentPage)}</div>
+        <h1>${title}</h1>
+        <div class="subtitle">${subtitle}</div>
+      </div>
+      ${action}
+    </div>`;
+}
 
-  const overdue = data.tasks.filter(taskIsOverdue);
-  if (overdue.length) {
-    const overdueCard = card("NEEDS ATTENTION", `${overdue.length} overdue task${overdue.length > 1 ? "s" : ""}`);
-    overdue.slice(0, 3).forEach(task => overdueCard.appendChild(makeTaskRow(task, false)));
-    mainEl.appendChild(overdueCard);
+function emptyState(message) {
+  return `<div class="empty">${escapeHTML(message)}</div>`;
+}
+
+function taskDone(task) {
+  return Boolean(task.completed);
+}
+
+function tasksForDay(key) {
+  return data.tasks.filter(task =>
+    task.dueDate === key || (!task.dueDate && task.createdAt === key)
+  );
+}
+
+function getStreak(habit) {
+  const completed = new Set(habit.history);
+  let cursor = todayKey();
+  if (!completed.has(cursor)) cursor = addDays(cursor, -1);
+
+  let streak = 0;
+  while (completed.has(cursor)) {
+    streak++;
+    cursor = addDays(cursor, -1);
+    if (streak > 10000) break;
   }
-}
-function miniStat(label, value) {
-  const box = el("div", "mini-stat");
-  box.append(el("span", "eyebrow", label), el("strong", "", value));
-  return box;
+  return streak;
 }
 
-/* ----------------------------- TASKS ----------------------------- */
+function statCard(label, value, foot = "") {
+  return `
+    <div class="panel">
+      <div class="stat-label">${escapeHTML(label)}</div>
+      <div class="stat-value">${value}</div>
+      <div class="stat-foot">${escapeHTML(foot)}</div>
+    </div>`;
+}
+
+function taskRow(task) {
+  const priority = task.priority.toLowerCase();
+  const due = task.dueDate
+    ? `Due ${formatDate(task.dueDate, { day: "numeric", month: "short" })}`
+    : "No due date";
+
+  return `
+    <div class="item ${task.completed ? "completed" : ""}">
+      <input class="check" type="checkbox" data-action="toggle-task"
+        data-id="${escapeHTML(task.id)}" ${task.completed ? "checked" : ""}>
+      <div class="item-main">
+        <div class="item-title">${escapeHTML(task.title)}</div>
+        <div class="item-meta">
+          <span class="tag ${priority}">${escapeHTML(task.priority)}</span>
+          <span class="tag">${escapeHTML(task.category)}</span>
+          <span>${escapeHTML(due)}</span>
+        </div>
+      </div>
+      <div class="item-actions">
+        <button class="icon-btn" data-action="edit-task" data-id="${escapeHTML(task.id)}">Edit</button>
+        <button class="icon-btn" data-action="delete-task" data-id="${escapeHTML(task.id)}">×</button>
+      </div>
+    </div>`;
+}
+
+function habitRow(habit) {
+  const done = habit.history.includes(todayKey());
+  return `
+    <div class="item ${done ? "completed" : ""}">
+      <input class="check" type="checkbox" data-action="toggle-habit"
+        data-id="${escapeHTML(habit.id)}" ${done ? "checked" : ""}>
+      <div class="item-main">
+        <div class="item-title">${escapeHTML(habit.title)}</div>
+        <div class="item-meta">
+          <span class="habit-streak">🔥 ${getStreak(habit)} day streak</span>
+          <span>${habit.history.length} completions</span>
+        </div>
+      </div>
+      <div class="item-actions">
+        <button class="icon-btn" data-action="edit-habit" data-id="${escapeHTML(habit.id)}">Edit</button>
+        <button class="icon-btn" data-action="delete-habit" data-id="${escapeHTML(habit.id)}">×</button>
+      </div>
+    </div>`;
+}
+
+/* ------------------------- TODAY ------------------------- */
+
+function renderToday() {
+  const key = todayKey();
+  const todaysTasks = tasksForDay(key);
+  const completed = todaysTasks.filter(taskDone).length;
+  const total = todaysTasks.length;
+  const percent = total ? Math.round(completed / total * 100) : 0;
+
+  const habitsDone = data.habits.filter(h => h.history.includes(key)).length;
+  const habitTotal = data.habits.length;
+  const habitPercent = habitTotal ? Math.round(habitsDone / habitTotal * 100) : 0;
+
+  const upcoming = data.tasks
+    .filter(task => !task.completed && task.dueDate && task.dueDate > key)
+    .sort((a, b) => a.dueDate.localeCompare(b.dueDate))
+    .slice(0, 5);
+
+  const weekBars = Array.from({ length: 7 }, (_, index) => {
+    const day = addDays(key, index - 6);
+    const dayTasks = tasksForDay(day);
+    const done = dayTasks.filter(taskDone).length;
+    const rate = dayTasks.length ? done / dayTasks.length * 100 : 0;
+    const label = parseDate(day).toLocaleDateString(undefined, { weekday: "short" }).slice(0, 2);
+    return `
+      <div class="week-bar-wrap">
+        <div class="week-bar" style="height:${Math.max(3, rate)}%"></div>
+        <div class="week-bar-label">${label}</div>
+      </div>`;
+  }).join("");
+
+  $("#main-content").innerHTML = `
+    ${pageHeading("Today", "Focus on what matters. Make today count.",
+      `<button class="btn" data-action="new-task">+ New Task</button>`)}
+    <div class="grid grid-4">
+      ${statCard("TASKS TODAY", `${completed}/${total}`, `${percent}% completed`)}
+      ${statCard("HABITS TODAY", `${habitsDone}/${habitTotal}`, `${habitPercent}% completed`)}
+      ${statCard("TOTAL TASKS", data.tasks.length, "All recorded tasks")}
+      ${statCard("ACTIVE HABITS", habitTotal, "Your daily commitments")}
+    </div>
+
+    <div class="grid grid-2 section-gap">
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Today's Progress</h2><span class="mini-label">${percent}%</span>
+        </div>
+        <div class="day-summary">
+          <div>
+            <div class="big-percent">${percent}<span class="mini-label">%</span></div>
+            <div class="mini-label">${completed} of ${total} tasks completed</div>
+          </div>
+        </div>
+        <div class="progress-track"><div class="progress-fill" style="width:${percent}%"></div></div>
+        <div class="section-gap">
+          <div class="section-title"><h3>Weekly Activity</h3><span class="mini-label">Last 7 days</span></div>
+          <div class="week-bars">${weekBars}</div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header"><h2>Today's Habits</h2>
+          <button class="btn btn-secondary btn-small" data-action="go-habits">View all</button>
+        </div>
+        <div class="list">
+          ${data.habits.length ? data.habits.map(habitRow).join("") : emptyState("Add your first habit to get started.")}
+        </div>
+      </section>
+    </div>
+
+    <section class="panel section-gap">
+      <div class="panel-header">
+        <h2>Today's Tasks</h2>
+        <button class="btn btn-secondary btn-small" data-action="go-tasks">View all</button>
+      </div>
+      <div class="list">
+        ${todaysTasks.length ? todaysTasks.map(taskRow).join("") : emptyState("No tasks scheduled for today.")}
+      </div>
+    </section>
+
+    <section class="panel section-gap">
+      <div class="panel-header"><h2>Upcoming Tasks</h2><span class="mini-label">Next due dates</span></div>
+      <div class="list">
+        ${upcoming.length ? upcoming.map(taskRow).join("") : emptyState("No upcoming tasks.")}
+      </div>
+    </section>`;
+}
+
+/* ------------------------- TASKS ------------------------- */
+
 function renderTasks() {
-  mainEl.replaceChildren();
-  pageIntro("PLAN WITH INTENTION", "Tasks", "Capture the work. Set priorities. Follow through.");
-  const editing = editingTaskId ? data.tasks.find(t => t.id === editingTaskId) : null;
-  if (editingTaskId && !editing) editingTaskId = null;
+  $("#main-content").innerHTML = `
+    ${pageHeading("Tasks", "Plan clearly. Execute consistently.",
+      `<button class="btn" data-action="new-task">+ New Task</button>`)}
+    <div class="toolbar">
+      <input id="task-search" type="search" placeholder="Search tasks...">
+      <select id="task-status">
+        <option value="all">All status</option>
+        <option value="active">Active</option>
+        <option value="completed">Completed</option>
+      </select>
+      <select id="task-priority">
+        <option value="all">All priorities</option>
+        <option>High</option><option>Medium</option><option>Low</option>
+      </select>
+      <select id="task-category">
+        <option value="all">All categories</option>
+        <option>Personal</option><option>Study</option><option>Trading</option>
+        <option>Basketball</option><option>Health</option>
+      </select>
+    </div>
+    <section class="panel">
+      <div class="panel-header"><h2>All Tasks</h2><span class="mini-label">${data.tasks.length} total</span></div>
+      <div class="list" id="task-list"></div>
+    </section>`;
 
-  const formCard = card(editing ? "EDIT TASK" : "NEW TASK", "Keep the next action clear and specific.");
-  const form = el("form", "task-form");
-  const title = input("text", editing ? editing.title : "", "What needs to get done?");
-  title.maxLength = 120;
-  title.required = true;
-  title.setAttribute("aria-label", "Task title");
-  const priority = select(PRIORITIES, editing ? editing.priority : "Medium");
-  const category = select(CATEGORIES, editing ? editing.category : "Personal");
-  const due = input("date", editing ? editing.dueDate : "");
-  const fields = el("div", "form-grid");
-  fields.append(field("PRIORITY", priority), field("CATEGORY", category), field("DUE DATE", due));
-  const actions = el("div", "form-actions");
-  actions.appendChild(button(editing ? "Save changes" : "＋ Add task", "button button-primary", null, "submit"));
-  if (editing) actions.appendChild(button("Cancel", "button button-secondary", () => { editingTaskId = null; renderTasks(); }));
-  form.append(title, fields, actions);
-  form.addEventListener("submit", event => {
-    event.preventDefault();
-    const taskTitle = title.value.trim();
-    if (!taskTitle) { title.focus(); return; }
-    const previous = JSON.stringify(data);
-    if (editing) {
-      const target = data.tasks.find(t => t.id === editing.id);
-      if (!target) return;
-      Object.assign(target, { title: taskTitle, priority: priority.value, category: category.value, dueDate: due.value || "" });
-    } else {
-      data.tasks.unshift({ id: createId(), title: taskTitle, completed: false, createdAt: todayKey(), completedAt: "", priority: priority.value, category: category.value, dueDate: due.value || "" });
-    }
-    if (!saveData()) { data = JSON.parse(previous); return; }
-    editingTaskId = null;
-    showToast(editing ? "Task updated." : "Task added.");
-    renderTasks();
-  });
-  formCard.appendChild(form);
-  mainEl.appendChild(formCard);
+  const update = () => {
+    const query = ($("#task-search").value || "").toLowerCase().trim();
+    const status = $("#task-status").value;
+    const priority = $("#task-priority").value;
+    const category = $("#task-category").value;
 
-  const controlsCard = card("TASK LIST", `${data.tasks.length} total`);
-  const controls = el("div", "filter-grid");
-  const search = input("search", taskFilters.search, "Search tasks...");
-  search.addEventListener("input", () => { taskFilters.search = search.value; renderTaskListInto(listWrap); });
-  const categoryFilter = select(["All", ...CATEGORIES], taskFilters.category);
-  categoryFilter.addEventListener("change", () => { taskFilters.category = categoryFilter.value; renderTaskListInto(listWrap); });
-  const priorityFilter = select(["All", ...PRIORITIES], taskFilters.priority);
-  priorityFilter.addEventListener("change", () => { taskFilters.priority = priorityFilter.value; renderTaskListInto(listWrap); });
-  const statusFilter = select(["Active", "Completed", "All"], taskFilters.status);
-  statusFilter.addEventListener("change", () => { taskFilters.status = statusFilter.value; renderTaskListInto(listWrap); });
-  controls.append(field("SEARCH", search), field("CATEGORY", categoryFilter), field("PRIORITY", priorityFilter), field("STATUS", statusFilter));
-  const listWrap = el("div", "task-list");
-  controlsCard.append(controls, listWrap);
-  renderTaskListInto(listWrap);
-  mainEl.appendChild(controlsCard);
-}
-function renderTaskListInto(container) {
-  container.replaceChildren();
-  const q = taskFilters.search.toLowerCase().trim();
-  const filtered = data.tasks.filter(task => {
-    const searchMatch = !q || task.title.toLowerCase().includes(q);
-    const categoryMatch = taskFilters.category === "All" || task.category === taskFilters.category;
-    const priorityMatch = taskFilters.priority === "All" || task.priority === taskFilters.priority;
-    const statusMatch = taskFilters.status === "All" || (taskFilters.status === "Completed" ? task.completed : !task.completed);
-    return searchMatch && categoryMatch && priorityMatch && statusMatch;
-  });
-  if (!filtered.length) {
-    container.appendChild(emptyState("No matching tasks.", "Try changing your filters or add a new task."));
-    return;
-  }
-  filtered.forEach(task => container.appendChild(makeTaskRow(task, true)));
-}
-
-/* ----------------------------- HABITS ----------------------------- */
-function makeHabitRow(habit, allowActions = true) {
-  const row = el("article", "habit-row");
-  const done = habit.completedDates.includes(todayKey());
-  const check = input("checkbox");
-  check.checked = done;
-  check.className = "check-control";
-  check.setAttribute("aria-label", `Mark ${habit.title} complete today`);
-  check.addEventListener("change", () => {
-    const previous = [...habit.completedDates];
-    if (check.checked) {
-      if (!habit.completedDates.includes(todayKey())) habit.completedDates.push(todayKey());
-    } else {
-      habit.completedDates = habit.completedDates.filter(date => date !== todayKey());
-    }
-    if (saveData()) showPage(currentPage);
-    else habit.completedDates = previous;
-  });
-  const info = el("div", "habit-row-info");
-  info.append(el("strong", "", habit.title), el("span", "muted small", `${habitStreak(habit)} day streak`));
-  row.append(check, info);
-  if (allowActions) {
-    const actions = el("div", "row-actions");
-    actions.append(
-      button("Edit", "text-button", () => { editingHabitId = habit.id; renderHabits(); }),
-      button("Delete", "text-button danger-text", () => {
-        if (!confirm(`Delete habit "${habit.title}" and its history?`)) return;
-        const previous = data.habits;
-        data.habits = data.habits.filter(item => item.id !== habit.id);
-        if (saveData()) { showToast("Habit deleted."); renderHabits(); }
-        else data.habits = previous;
-      })
-    );
-    row.appendChild(actions);
-  }
-  return row;
-}
-function renderHabits() {
-  mainEl.replaceChildren();
-  pageIntro("BUILD YOUR ROUTINE", "Habits", "Small actions, repeated consistently, become part of who you are.");
-  const editing = editingHabitId ? data.habits.find(h => h.id === editingHabitId) : null;
-  if (editingHabitId && !editing) editingHabitId = null;
-  const formCard = card(editing ? "EDIT HABIT" : "NEW HABIT");
-  const form = el("form", "task-form");
-  const title = input("text", editing ? editing.title : "", "Example: Read 10 pages");
-  title.maxLength = 100;
-  title.required = true;
-  const actions = el("div", "form-actions");
-  actions.appendChild(button(editing ? "Save habit" : "＋ Add habit", "button button-primary", null, "submit"));
-  if (editing) actions.appendChild(button("Cancel", "button button-secondary", () => { editingHabitId = null; renderHabits(); }));
-  form.append(title, actions);
-  form.addEventListener("submit", event => {
-    event.preventDefault();
-    const value = title.value.trim();
-    if (!value) return;
-    const previous = JSON.stringify(data);
-    if (editing) {
-      const target = data.habits.find(h => h.id === editing.id);
-      if (!target) return;
-      target.title = value;
-    } else {
-      data.habits.push({ id: createId(), title: value, createdAt: todayKey(), completedDates: [] });
-    }
-    if (!saveData()) { data = JSON.parse(previous); return; }
-    editingHabitId = null;
-    showToast(editing ? "Habit updated." : "Habit added.");
-    renderHabits();
-  });
-  formCard.appendChild(form);
-  mainEl.appendChild(formCard);
-
-  const listCard = card("YOUR HABITS", `${completedHabitsCount()}/${data.habits.length} completed today`);
-  if (!data.habits.length) listCard.appendChild(emptyState("Build your first routine.", "Choose one small habit you can repeat daily."));
-  else data.habits.forEach(habit => listCard.appendChild(makeHabitRow(habit, true)));
-  mainEl.appendChild(listCard);
-
-  if (data.habits.length) {
-    const historyCard = card("LAST 7 DAYS", "A simple record of consistency");
-    const grid = el("div", "habit-history");
-    const start = addDays(todayKey(), -6);
-    data.habits.forEach(habit => {
-      const item = el("div", "history-row");
-      item.appendChild(el("strong", "", habit.title));
-      const days = el("div", "history-days");
-      for (let i = 0; i < 7; i++) {
-        const key = addDays(start, i);
-        const cell = el("span", `history-dot${habit.completedDates.includes(key) ? " done" : ""}`);
-        cell.title = `${formatDate(key)}${habit.completedDates.includes(key) ? " · Done" : ""}`;
-        days.appendChild(cell);
-      }
-      item.appendChild(days);
-      grid.appendChild(item);
+    const filtered = data.tasks.filter(task => {
+      const matchesQuery = task.title.toLowerCase().includes(query);
+      const matchesStatus = status === "all" ||
+        (status === "active" && !task.completed) ||
+        (status === "completed" && task.completed);
+      return matchesQuery && matchesStatus &&
+        (priority === "all" || task.priority === priority) &&
+        (category === "all" || task.category === category);
+    }).sort((a, b) => {
+      if (a.completed !== b.completed) return Number(a.completed) - Number(b.completed);
+      if (a.dueDate && b.dueDate) return a.dueDate.localeCompare(b.dueDate);
+      if (a.dueDate) return -1;
+      if (b.dueDate) return 1;
+      return b.createdAt.localeCompare(a.createdAt);
     });
-    historyCard.appendChild(grid);
-    mainEl.appendChild(historyCard);
-  }
+
+    $("#task-list").innerHTML = filtered.length
+      ? filtered.map(taskRow).join("")
+      : emptyState("No matching tasks found.");
+  };
+
+  ["task-search", "task-status", "task-priority", "task-category"].forEach(id => {
+    $(`#${id}`).addEventListener(id === "task-search" ? "input" : "change", update);
+  });
+  update();
 }
 
-/* ----------------------------- CALENDAR ----------------------------- */
-function calendarItemsFor(key) {
-  return {
-    tasks: data.tasks.filter(task => task.dueDate === key),
-    habits: data.habits.filter(habit => habit.completedDates.includes(key))
-  };
+/* ------------------------- HABITS ------------------------- */
+
+function renderHabits() {
+  $("#main-content").innerHTML = `
+    ${pageHeading("Habits", "Consistency turns actions into identity.",
+      `<button class="btn" data-action="new-habit">+ New Habit</button>`)}
+    <div class="grid grid-3">
+      ${statCard("TOTAL HABITS", data.habits.length, "Active habits")}
+      ${statCard("COMPLETED TODAY", data.habits.filter(h => h.history.includes(todayKey())).length,
+        "Habits checked today")}
+      ${statCard("TOTAL CHECK-INS", data.habits.reduce((sum, h) => sum + h.history.length, 0),
+        "All-time completions")}
+    </div>
+    <section class="panel section-gap">
+      <div class="panel-header"><h2>Your Daily Habits</h2><span class="mini-label">${formatDate(todayKey())}</span></div>
+      <div class="list">
+        ${data.habits.length ? data.habits.map(habitRow).join("") : emptyState("No habits yet. Add one small commitment.")}
+      </div>
+    </section>
+    <section class="panel section-gap">
+      <div class="panel-header"><h2>Last 7 Days</h2><span class="mini-label">Habit history</span></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>HABIT</th>${Array.from({ length: 7 }, (_, i) =>
+            `<th>${parseDate(addDays(todayKey(), i - 6)).toLocaleDateString(undefined, { weekday: "short" })}</th>`
+          ).join("")}</tr></thead>
+          <tbody>
+            ${data.habits.map(h => `<tr><td>${escapeHTML(h.title)}</td>${
+              Array.from({ length: 7 }, (_, i) => {
+                const key = addDays(todayKey(), i - 6);
+                return `<td>${h.history.includes(key) ? "✓" : "—"}</td>`;
+              }).join("")
+            }</tr>`).join("")}
+          </tbody>
+        </table>
+      </div>
+    </section>`;
 }
+
+/* ------------------------- CALENDAR ------------------------- */
+
+function calendarDayCell(date, currentMonth) {
+  const key = dateKey(date);
+  const tasks = tasksForDay(key);
+  const habits = data.habits.filter(h => h.history.includes(key)).length;
+  const isToday = key === todayKey();
+  const isSelected = key === selectedCalendarDate;
+  return `
+    <button class="calendar-day ${currentMonth ? "" : "muted"} ${isToday ? "today" : ""} ${isSelected ? "selected" : ""}"
+      data-action="select-date" data-date="${key}">
+      ${date.getDate()}
+      <div class="calendar-dots">
+        ${tasks.slice(0, 4).map(() => "<i></i>").join("")}
+        ${habits ? "<i></i>" : ""}
+      </div>
+    </button>`;
+}
+
 function renderCalendar() {
-  mainEl.replaceChildren();
-  pageIntro("SEE THE BIG PICTURE", "Calendar", "Review deadlines and the days you showed up.");
-  const shell = card("PLANNER", "Monthly and weekly views");
-  const toolbar = el("div", "calendar-toolbar");
-  const title = el("strong", "calendar-title", "");
-  const left = button("‹", "icon-button", () => moveCalendar(-1));
-  const right = button("›", "icon-button", () => moveCalendar(1));
-  const todayBtn = button("Today", "button button-secondary compact", () => {
-    calendarCursor = new Date();
-    selectedCalendarDate = todayKey();
+  const year = calendarDate.getFullYear();
+  const month = calendarDate.getMonth();
+  const monthLabel = calendarDate.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+
+  const monthStart = new Date(year, month, 1);
+  const start = new Date(year, month, 1 - monthStart.getDay());
+
+  let calendarHTML = "";
+  if (calendarMode === "month") {
+    calendarHTML = `
+      <div class="calendar-grid">
+        ${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(day =>
+          `<div class="calendar-weekday">${day}</div>`).join("")}
+        ${Array.from({ length: 42 }, (_, i) => {
+          const date = new Date(start);
+          date.setDate(start.getDate() + i);
+          return calendarDayCell(date, date.getMonth() === month);
+        }).join("")}
+      </div>`;
+  } else {
+    const selected = parseDate(selectedCalendarDate) || new Date();
+    const weekStart = new Date(selected);
+    weekStart.setDate(selected.getDate() - selected.getDay());
+    calendarHTML = Array.from({ length: 7 }, (_, i) => {
+      const date = new Date(weekStart);
+      date.setDate(weekStart.getDate() + i);
+      const key = dateKey(date);
+      const tasks = tasksForDay(key);
+      return `
+        <div class="week-row">
+          <div class="week-row-date">${date.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" })}</div>
+          <div class="week-row-content">
+            ${tasks.length ? tasks.map(t => `<span class="tag ${t.priority.toLowerCase()}">${escapeHTML(t.title)}</span>`).join("") : '<span class="mini-label">No tasks</span>'}
+            ${data.habits.filter(h => h.history.includes(key)).length
+              ? `<span class="tag">Habit check-ins: ${data.habits.filter(h => h.history.includes(key)).length}</span>` : ""}
+          </div>
+        </div>`;
+    }).join("");
+  }
+
+  const selectedTasks = tasksForDay(selectedCalendarDate);
+  const selectedHabits = data.habits.filter(h => h.history.includes(selectedCalendarDate));
+
+  $("#main-content").innerHTML = `
+    ${pageHeading("Calendar", "See your commitments. Review your consistency.")}
+    <section class="panel">
+      <div class="panel-header">
+        <div class="calendar-toolbar">
+          <button class="icon-btn" data-action="calendar-prev">‹</button>
+          <div class="calendar-title">${calendarMode === "month" ? monthLabel : "Selected week"}</div>
+          <button class="icon-btn" data-action="calendar-next">›</button>
+          <button class="icon-btn" data-action="calendar-today">Today</button>
+        </div>
+        <select id="calendar-mode" class="field-input" aria-label="Calendar view">
+          <option value="month" ${calendarMode === "month" ? "selected" : ""}>Month</option>
+          <option value="week" ${calendarMode === "week" ? "selected" : ""}>Week</option>
+        </select>
+      </div>
+      ${calendarHTML}
+    </section>
+    <section class="panel section-gap">
+      <div class="panel-header">
+        <h2>${formatDate(selectedCalendarDate)}</h2>
+        <button class="btn btn-secondary btn-small" data-action="new-task">+ Add Task</button>
+      </div>
+      <div class="list">
+        ${selectedTasks.length ? selectedTasks.map(taskRow).join("") : emptyState("No tasks for this date.")}
+        ${selectedHabits.map(h => `<div class="item"><div class="item-main"><div class="item-title">✓ ${escapeHTML(h.title)}</div><div class="item-meta">Habit completed</div></div></div>`).join("")}
+      </div>
+    </section>`;
+
+  $("#calendar-mode").addEventListener("change", event => {
+    calendarMode = event.target.value;
     renderCalendar();
   });
-  const mode = el("div", "segmented");
-  const monthBtn = button("Month", calendarMode === "Month" ? "segment active" : "segment", () => { calendarMode = "Month"; renderCalendar(); });
-  const weekBtn = button("Week", calendarMode === "Week" ? "segment active" : "segment", () => { calendarMode = "Week"; renderCalendar(); });
-  mode.append(monthBtn, weekBtn);
-  toolbar.append(left, title, right, todayBtn, mode);
-  shell.appendChild(toolbar);
-
-  if (calendarMode === "Month") {
-    title.textContent = monthTitle(calendarCursor);
-    const grid = el("div", "month-grid");
-    ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].forEach(day => grid.appendChild(el("div", "weekday", day)));
-    const first = new Date(calendarCursor.getFullYear(), calendarCursor.getMonth(), 1);
-    const offset = (first.getDay() + 6) % 7;
-    const totalCells = Math.ceil((offset + daysInMonth(calendarCursor.getFullYear(), calendarCursor.getMonth())) / 7) * 7;
-    for (let i = 0; i < totalCells; i++) {
-      const dayNum = i - offset + 1;
-      const d = new Date(calendarCursor.getFullYear(), calendarCursor.getMonth(), dayNum, 12);
-      const key = keyFromDate(d);
-      const inMonth = d.getMonth() === calendarCursor.getMonth();
-      const items = calendarItemsFor(key);
-      const count = items.tasks.length + items.habits.length;
-      const cell = button("", `calendar-day${inMonth ? "" : " outside"}${key === todayKey() ? " today" : ""}${key === selectedCalendarDate ? " selected" : ""}`, () => {
-        selectedCalendarDate = key;
-        renderCalendar();
-      });
-      cell.append(el("span", "day-number", String(d.getDate())));
-      if (count) cell.appendChild(el("span", "day-count", String(count)));
-      grid.appendChild(cell);
-    }
-    shell.appendChild(grid);
-  } else {
-    const weekStart = startOfWeek(keyFromDate(calendarCursor));
-    const weekEnd = addDays(weekStart, 6);
-    title.textContent = `${formatDate(weekStart, { month: "short", day: "numeric" })} – ${formatDate(weekEnd, { month: "short", day: "numeric", year: "numeric" })}`;
-    const grid = el("div", "week-grid");
-    for (let i = 0; i < 7; i++) {
-      const key = addDays(weekStart, i);
-      const items = calendarItemsFor(key);
-      const cell = button("", `week-day${key === todayKey() ? " today" : ""}${key === selectedCalendarDate ? " selected" : ""}`, () => { selectedCalendarDate = key; renderCalendar(); });
-      cell.append(el("span", "weekday", formatDate(key, { weekday: "short" })), el("strong", "week-day-number", String(dateFromKey(key).getDate())));
-      if (items.tasks.length + items.habits.length) cell.appendChild(el("span", "day-count", String(items.tasks.length + items.habits.length)));
-      grid.appendChild(cell);
-    }
-    shell.appendChild(grid);
-  }
-  mainEl.appendChild(shell);
-
-  const selected = calendarItemsFor(selectedCalendarDate);
-  const selectedCard = card(formatDate(selectedCalendarDate, { weekday: "long", month: "long", day: "numeric", year: "numeric" }), "Scheduled tasks and completed habits");
-  if (!selected.tasks.length && !selected.habits.length) selectedCard.appendChild(emptyState("Nothing recorded.", "Tasks with this due date and completed habits will appear here."));
-  selected.tasks.forEach(task => selectedCard.appendChild(makeTaskRow(task, true)));
-  selected.habits.forEach(habit => {
-    const line = el("div", "calendar-entry");
-    line.append(el("span", "event-dot habit-dot"), el("span", "", habit.title), el("span", "muted small", "Habit completed"));
-    selectedCard.appendChild(line);
-  });
-  mainEl.appendChild(selectedCard);
-}
-function moveCalendar(direction) {
-  if (calendarMode === "Month") calendarCursor = new Date(calendarCursor.getFullYear(), calendarCursor.getMonth() + direction, 1, 12);
-  else calendarCursor.setDate(calendarCursor.getDate() + direction * 7);
-  selectedCalendarDate = keyFromDate(calendarCursor);
-  renderCalendar();
 }
 
-/* ----------------------------- ANALYTICS ----------------------------- */
+/* ------------------------- ANALYTICS ------------------------- */
+
 function renderAnalytics() {
-  mainEl.replaceChildren();
-  pageIntro("MEASURE WHAT MATTERS", "Analytics", "Use the numbers to learn, not to judge yourself.");
-  const totalTasks = data.tasks.length;
-  const doneTasks = completedTasksCount();
-  const activeTasks = totalTasks - doneTasks;
-  const totalHabits = data.habits.length;
-  const doneHabits = completedHabitsCount();
-  const overview = card("OVERVIEW", "Current snapshot");
-  const statGrid = el("div", "analytics-grid");
-  statGrid.append(
-    analyticsStat("TASKS COMPLETED", `${doneTasks}/${totalTasks}`, totalTasks ? Math.round(doneTasks / totalTasks * 100) : 0),
-    analyticsStat("ACTIVE TASKS", String(activeTasks), null),
-    analyticsStat("HABITS TODAY", `${doneHabits}/${totalHabits}`, totalHabits ? Math.round(doneHabits / totalHabits * 100) : 0),
-    analyticsStat("OVERDUE TASKS", String(data.tasks.filter(taskIsOverdue).length), null)
-  );
-  overview.appendChild(statGrid);
-  mainEl.appendChild(overview);
+  const total = data.tasks.length;
+  const completed = data.tasks.filter(t => t.completed).length;
+  const active = total - completed;
+  const rate = total ? Math.round(completed / total * 100) : 0;
 
-  const priorities = card("OPEN TASKS BY PRIORITY");
-  PRIORITIES.forEach(priority => {
-    const count = data.tasks.filter(t => !t.completed && t.priority === priority).length;
-    priorities.appendChild(analyticsLine(priority, count, activeTasks ? count / activeTasks * 100 : 0));
+  const priorityCounts = ["High", "Medium", "Low"].map(priority => ({
+    label: priority,
+    count: data.tasks.filter(t => t.priority === priority).length
+  }));
+
+  const categoryCounts = ["Personal", "Study", "Trading", "Basketball", "Health"].map(category => ({
+    label: category,
+    count: data.tasks.filter(t => t.category === category).length
+  }));
+
+  const lastSeven = Array.from({ length: 7 }, (_, i) => {
+    const key = addDays(todayKey(), i - 6);
+    const created = data.tasks.filter(t => t.createdAt === key).length;
+    const done = data.tasks.filter(t => t.completedAt === key).length;
+    return { key, created, done };
   });
-  mainEl.appendChild(priorities);
 
-  const categories = card("TASKS BY CATEGORY");
-  CATEGORIES.forEach(category => {
-    const count = data.tasks.filter(t => t.category === category).length;
-    categories.appendChild(analyticsLine(category, count, totalTasks ? count / totalTasks * 100 : 0));
-  });
-  mainEl.appendChild(categories);
+  const barRows = items => items.map(item => {
+    const percent = total ? item.count / total * 100 : 0;
+    return `
+      <div class="bar-row">
+        <span>${escapeHTML(item.label)}</span>
+        <div class="progress-track"><div class="progress-fill" style="width:${percent}%"></div></div>
+        <span>${item.count}</span>
+      </div>`;
+  }).join("");
 
-  const weekly = card("LAST 7 DAYS", "Tasks completed and habits checked");
-  const chart = el("div", "week-chart");
-  const start = addDays(todayKey(), -6);
-  for (let i = 0; i < 7; i++) {
-    const key = addDays(start, i);
-    const taskCount = data.tasks.filter(t => t.completed && t.completedAt === key).length;
-    const habitCount = data.habits.filter(h => h.completedDates.includes(key)).length;
-    const total = taskCount + habitCount;
-    const col = el("div", "chart-column");
-    const bar = el("div", "chart-bar-wrap");
-    const fill = el("div", "chart-bar");
-    fill.style.height = `${Math.max(4, Math.min(100, total * 18))}%`;
-    bar.appendChild(fill);
-    col.append(bar, el("strong", "", String(total)), el("span", "muted tiny", formatDate(key, { weekday: "short" })));
-    chart.appendChild(col);
-  }
-  weekly.appendChild(chart);
-  mainEl.appendChild(weekly);
-
-  const habitStats = card("HABIT CONSISTENCY", "Current streaks");
-  if (!data.habits.length) habitStats.appendChild(emptyState("No habits yet.", "Add habits to start tracking consistency."));
-  else data.habits.forEach(habit => {
-    const line = el("div", "analytics-line");
-    line.append(el("span", "", habit.title), el("strong", "", `${habitStreak(habit)} days`));
-    habitStats.appendChild(line);
-  });
-  mainEl.appendChild(habitStats);
-
-  const backup = card("DATA BACKUP", "Keep a copy of your information.");
-  backup.appendChild(el("p", "muted small", "Export a JSON backup before changing devices or importing another backup."));
-  const backupActions = el("div", "backup-actions");
-  backupActions.appendChild(button("↓ Export backup", "button button-primary", exportBackup));
-  const importBtn = button("↑ Import backup", "button button-secondary", () => fileInput.click());
-  const fileInput = input("file");
-  fileInput.accept = ".json,application/json";
-  fileInput.hidden = true;
-  fileInput.addEventListener("change", () => {
-    const file = fileInput.files && fileInput.files[0];
-    if (file) importBackup(file);
-    fileInput.value = "";
-  });
-  backupActions.append(importBtn, fileInput);
-  backup.appendChild(backupActions);
-  mainEl.appendChild(backup);
-}
-function analyticsStat(label, value, percent) {
-  const box = el("div", "analytics-stat");
-  box.append(el("span", "eyebrow", label), el("strong", "", value));
-  if (percent !== null) box.appendChild(progressBar(percent));
-  return box;
-}
-function analyticsLine(label, count, percent) {
-  const line = el("div", "analytics-line");
-  const left = el("div", "analytics-line-main");
-  left.append(el("span", "", label), progressBar(percent));
-  line.append(left, el("strong", "", String(count)));
-  return line;
+  $("#main-content").innerHTML = `
+    ${pageHeading("Analytics", "Measure your actions. Improve your system.")}
+    <div class="grid grid-4">
+      ${statCard("TOTAL TASKS", total, "All recorded tasks")}
+      ${statCard("COMPLETED", completed, "Tasks completed")}
+      ${statCard("ACTIVE", active, "Tasks remaining")}
+      ${statCard("COMPLETION RATE", `${rate}%`, "Overall task completion")}
+    </div>
+    <div class="grid grid-2 section-gap">
+      <section class="panel">
+        <div class="panel-header"><h2>Priority Breakdown</h2></div>
+        ${barRows(priorityCounts)}
+      </section>
+      <section class="panel">
+        <div class="panel-header"><h2>Category Breakdown</h2></div>
+        ${barRows(categoryCounts)}
+      </section>
+    </div>
+    <section class="panel section-gap">
+      <div class="panel-header"><h2>Last 7 Days</h2><span class="mini-label">Task activity</span></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>DATE</th><th>CREATED</th><th>COMPLETED</th></tr></thead>
+          <tbody>
+            ${lastSeven.map(day => `<tr>
+              <td>${formatDate(day.key, { weekday: "short", day: "numeric", month: "short" })}</td>
+              <td>${day.created}</td><td>${day.done}</td>
+            </tr>`).join("")}
+          </tbody>
+        </table>
+      </div>
+    </section>
+    <section class="panel section-gap">
+      <div class="panel-header"><h2>Habit Overview</h2></div>
+      ${data.habits.length ? data.habits.map(h => `
+        <div class="bar-row">
+          <span>${escapeHTML(h.title)}</span>
+          <div class="progress-track"><div class="progress-fill" style="width:${Math.min(100, h.history.length / Math.max(1, Math.floor((Date.now() - (parseDate(h.createdAt) || new Date()).getTime()) / 86400000) + 1) * 100)}%"></div></div>
+          <span>${h.history.length}</span>
+        </div>`).join("") : emptyState("Add habits to see your habit analytics.")}
+    </section>`;
 }
 
-/* ----------------------------- BACKUP ----------------------------- */
+/* ------------------------- BACKUP ------------------------- */
+
+function renderBackup() {
+  const size = new Blob([JSON.stringify(data)]).size;
+  $("#main-content").innerHTML = `
+    ${pageHeading("Backup", "Protect your progress. Keep your data safe.")}
+    <section class="panel">
+      <div class="backup-card">
+        <div>
+          <h2>Export Backup</h2>
+          <p>Download a copy of your tasks and habits as a JSON file.<br>
+          Current records: ${data.tasks.length} tasks · ${data.habits.length} habits<br>
+          Approximate data size: ${size} bytes</p>
+        </div>
+        <button class="btn" data-action="export-backup">Export JSON</button>
+      </div>
+    </section>
+    <section class="panel section-gap">
+      <div class="backup-card">
+        <div>
+          <h2>Import Backup</h2>
+          <p>Restore your data from a DAILY OS JSON backup.<br>
+          Importing replaces the current data in this browser.</p>
+        </div>
+        <label class="btn btn-secondary" for="import-file">Choose File</label>
+        <input class="file-input" id="import-file" type="file" accept=".json,application/json">
+      </div>
+    </section>
+    <section class="panel section-gap">
+      <h2>Storage Information</h2>
+      <p class="subtitle">DAILY OS stores information locally in this browser using localStorage.</p>
+      <p class="subtitle">Data does not automatically sync between devices. Export backups regularly.</p>
+    </section>`;
+}
+
+/* ------------------------- MODALS ------------------------- */
+
+function openModal(content) {
+  $("#modal").innerHTML = content;
+  $("#modal-backdrop").classList.add("open");
+}
+
+function closeModal() {
+  $("#modal-backdrop").classList.remove("open");
+  $("#modal").innerHTML = "";
+}
+
+function taskForm(task = null) {
+  const editing = Boolean(task);
+  openModal(`
+    <h2>${editing ? "Edit Task" : "New Task"}</h2>
+    <form id="task-form">
+      <div class="form-grid">
+        <div class="field full">
+          <label for="task-title-input">Task name</label>
+          <input id="task-title-input" name="title" required maxlength="120"
+            placeholder="What needs to be done?" value="${escapeHTML(task?.title || "")}">
+        </div>
+        <div class="field">
+          <label for="task-priority-input">Priority</label>
+          <select id="task-priority-input" name="priority">
+            ${["High", "Medium", "Low"].map(v => `<option ${task?.priority === v ? "selected" : ""}>${v}</option>`).join("")}
+          </select>
+        </div>
+        <div class="field">
+          <label for="task-category-input">Category</label>
+          <select id="task-category-input" name="category">
+            ${["Personal", "Study", "Trading", "Basketball", "Health"].map(v => `<option ${task?.category === v ? "selected" : ""}>${v}</option>`).join("")}
+          </select>
+        </div>
+        <div class="field full">
+          <label for="task-due-input">Due date</label>
+          <input id="task-due-input" name="dueDate" type="date" value="${escapeHTML(task?.dueDate || "")}">
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" data-action="close-modal">Cancel</button>
+        <button type="submit" class="btn">${editing ? "Save Changes" : "Add Task"}</button>
+      </div>
+    </form>`);
+
+  $("#task-form").addEventListener("submit", event => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const title = String(form.get("title") || "").trim();
+    if (!title) return;
+
+    if (editing) {
+      task.title = title;
+      task.priority = String(form.get("priority"));
+      task.category = String(form.get("category"));
+      task.dueDate = String(form.get("dueDate") || "");
+    } else {
+      data.tasks.push(normalizeTask({
+        id: uid(), title,
+        priority: form.get("priority"),
+        category: form.get("category"),
+        dueDate: form.get("dueDate"),
+        createdAt: todayKey(),
+        completed: false
+      }));
+    }
+
+    saveData();
+    closeModal();
+    render();
+    showToast(editing ? "Task updated." : "Task added.");
+  });
+}
+
+function habitForm(habit = null) {
+  const editing = Boolean(habit);
+  openModal(`
+    <h2>${editing ? "Edit Habit" : "New Habit"}</h2>
+    <form id="habit-form">
+      <div class="field">
+        <label for="habit-title-input">Habit name</label>
+        <input id="habit-title-input" name="title" required maxlength="100"
+          placeholder="e.g. Read 10 pages" value="${escapeHTML(habit?.title || "")}">
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" data-action="close-modal">Cancel</button>
+        <button type="submit" class="btn">${editing ? "Save Changes" : "Add Habit"}</button>
+      </div>
+    </form>`);
+
+  $("#habit-form").addEventListener("submit", event => {
+    event.preventDefault();
+    const title = String(new FormData(event.currentTarget).get("title") || "").trim();
+    if (!title) return;
+
+    if (editing) habit.title = title;
+    else data.habits.push({ id: uid(), title, createdAt: todayKey(), history: [] });
+
+    saveData();
+    closeModal();
+    render();
+    showToast(editing ? "Habit updated." : "Habit added.");
+  });
+}
+
+/* ------------------------- ACTIONS ------------------------- */
+
+function toggleTask(id, checked) {
+  const task = data.tasks.find(item => item.id === id);
+  if (!task) return;
+  task.completed = checked;
+  task.completedAt = checked ? todayKey() : null;
+  saveData();
+  render();
+}
+
+function toggleHabit(id, checked) {
+  const habit = data.habits.find(item => item.id === id);
+  if (!habit) return;
+  const history = new Set(habit.history);
+  if (checked) history.add(todayKey());
+  else history.delete(todayKey());
+  habit.history = [...history].sort();
+  saveData();
+  render();
+}
+
+function deleteTask(id) {
+  if (!confirm("Delete this task?")) return;
+  data.tasks = data.tasks.filter(task => task.id !== id);
+  saveData();
+  render();
+  showToast("Task deleted.");
+}
+
+function deleteHabit(id) {
+  if (!confirm("Delete this habit and its history?")) return;
+  data.habits = data.habits.filter(habit => habit.id !== id);
+  saveData();
+  render();
+  showToast("Habit deleted.");
+}
+
 function exportBackup() {
-  try {
-    const payload = {
-      app: "DAILY OS",
-      backupVersion: BACKUP_VERSION,
-      appVersion: APP_VERSION,
-      exportedAt: new Date().toISOString(),
-      data: JSON.parse(JSON.stringify(data))
-    };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const link = el("a");
-    link.href = url;
-    link.download = `daily-os-backup-${todayKey()}.json`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1500);
-    showToast("Backup exported.");
-  } catch (error) {
-    console.error(error);
-    showToast("Could not export backup.", "error");
-  }
+  const backup = {
+    app: "DAILY OS",
+    version: "3.0",
+    exportedAt: new Date().toISOString(),
+    tasks: data.tasks,
+    habits: data.habits
+  };
+  const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `daily-os-backup-${todayKey()}.json`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+  showToast("Backup exported.");
 }
+
 function importBackup(file) {
+  if (!file) return;
   const reader = new FileReader();
+
   reader.onload = () => {
     try {
-      const parsed = JSON.parse(reader.result);
-      let raw = parsed;
-      if (parsed && parsed.app === "DAILY OS") {
-        if (!Number.isInteger(parsed.backupVersion) || parsed.backupVersion < 1 || parsed.backupVersion > BACKUP_VERSION) {
-          throw new Error("This backup version is not supported.");
-        }
-        raw = parsed.data;
+      const parsed = JSON.parse(String(reader.result));
+      if (!parsed || !Array.isArray(parsed.tasks) || !Array.isArray(parsed.habits)) {
+        throw new Error("Invalid backup structure");
       }
-      const imported = normalizeData(raw);
-      if (!confirm(`Import this backup?\n\nTasks: ${imported.tasks.length}\nHabits: ${imported.habits.length}\n\nYour current data will be replaced.`)) return;
-      const previous = data;
-      data = imported;
-      if (!saveData()) { data = previous; return; }
-      editingTaskId = null;
-      editingHabitId = null;
-      showToast("Backup imported successfully.");
-      showPage(currentPage);
+      if (!confirm("Importing will replace the current tasks and habits. Continue?")) return;
+
+      data = {
+        tasks: parsed.tasks.map(normalizeTask),
+        habits: parsed.habits.map(normalizeHabit)
+      };
+      if (saveData()) {
+        render();
+        showToast("Backup imported successfully.");
+      }
     } catch (error) {
-      console.error("Backup import failed:", error);
-      showToast(error.message || "Invalid backup file.", "error");
+      console.error(error);
+      showToast("Invalid backup file.");
+    } finally {
+      $("#import-file").value = "";
     }
   };
-  reader.onerror = () => showToast("Could not read that file.", "error");
+
+  reader.onerror = () => showToast("Could not read the selected file.");
   reader.readAsText(file);
 }
 
-/* ----------------------------- INITIALIZATION ----------------------------- */
-function startApp() {
-  headerEl = document.getElementById("app-header");
-  mainEl = document.getElementById("main-content");
-  navEl = document.getElementById("bottom-navigation");
-  if (!headerEl || !mainEl || !navEl) {
-    document.body.textContent = "DAILY OS could not start: required page elements are missing.";
+/* ------------------------- EVENT DELEGATION ------------------------- */
+
+document.addEventListener("click", event => {
+  const nav = event.target.closest("[data-page]");
+  if (nav) {
+    setPage(nav.dataset.page);
     return;
   }
-  data = loadData();
-  renderHeader();
-  renderNavigation();
-  showPage("Today");
-  console.log(`DAILY OS ${APP_VERSION} ready.`);
+
+  const button = event.target.closest("[data-action]");
+  if (!button) return;
+
+  const { action, id, date } = button.dataset;
+
+  switch (action) {
+    case "new-task": taskForm(); break;
+    case "new-habit": habitForm(); break;
+    case "edit-task": {
+      const task = data.tasks.find(item => item.id === id);
+      if (task) taskForm(task);
+      break;
+    }
+    case "edit-habit": {
+      const habit = data.habits.find(item => item.id === id);
+      if (habit) habitForm(habit);
+      break;
+    }
+    case "delete-task": deleteTask(id); break;
+    case "delete-habit": deleteHabit(id); break;
+    case "close-modal": closeModal(); break;
+    case "export-backup": exportBackup(); break;
+    case "go-tasks": setPage("tasks"); break;
+    case "go-habits": setPage("habits"); break;
+    case "select-date":
+      selectedCalendarDate = date;
+      calendarDate = parseDate(date) || calendarDate;
+      renderCalendar();
+      break;
+    case "calendar-prev":
+      if (calendarMode === "month") calendarDate.setMonth(calendarDate.getMonth() - 1);
+      else selectedCalendarDate = addDays(selectedCalendarDate, -7);
+      if (calendarMode === "week") calendarDate = parseDate(selectedCalendarDate);
+      renderCalendar();
+      break;
+    case "calendar-next":
+      if (calendarMode === "month") calendarDate.setMonth(calendarDate.getMonth() + 1);
+      else selectedCalendarDate = addDays(selectedCalendarDate, 7);
+      if (calendarMode === "week") calendarDate = parseDate(selectedCalendarDate);
+      renderCalendar();
+      break;
+    case "calendar-today":
+      calendarDate = new Date();
+      selectedCalendarDate = todayKey();
+      renderCalendar();
+      break;
+  }
+});
+
+document.addEventListener("change", event => {
+  const target = event.target;
+  if (target.matches('[data-action="toggle-task"]')) {
+    toggleTask(target.dataset.id, target.checked);
+  }
+  if (target.matches('[data-action="toggle-habit"]')) {
+    toggleHabit(target.dataset.id, target.checked);
+  }
+  if (target.id === "import-file") {
+    importBackup(target.files?.[0]);
+  }
+});
+
+$("#mobile-menu").addEventListener("click", () => {
+  $("#sidebar").classList.toggle("open");
+});
+
+$("#modal-backdrop").addEventListener("click", event => {
+  if (event.target.id === "modal-backdrop") closeModal();
+});
+
+document.addEventListener("keydown", event => {
+  if (event.key === "Escape") closeModal();
+});
+
+/* ------------------------- RENDER ------------------------- */
+
+function render() {
+  updateHeader();
+
+  switch (currentPage) {
+    case "today": renderToday(); break;
+    case "tasks": renderTasks(); break;
+    case "habits": renderHabits(); break;
+    case "calendar": renderCalendar(); break;
+    case "analytics": renderAnalytics(); break;
+    case "backup": renderBackup(); break;
+    default:
+      currentPage = "today";
+      renderToday();
+  }
 }
-if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", startApp, { once: true });
-else startApp();
+
+function init() {
+  // Normalize legacy data and persist the compatible structure.
+  data.tasks = data.tasks.map(normalizeTask);
+  data.habits = data.habits.map(normalizeHabit);
+  saveData();
+  updateHeader();
+  render();
+}
+
+init();
