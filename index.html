@@ -1,69 +1,57 @@
-<!DOCTYPE html>
-<html lang="en">
+
+<!doctype html>
+<html lang="th">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="theme-color" content="#0b0b0b">
-  <meta name="description" content="DAILY OS — Personal Productivity System">
-  <title>DAILY OS</title>
-  <link rel="manifest" href="./manifest.json">
-  <link rel="apple-touch-icon" href="./icon-192.png">
-  <link rel="stylesheet" href="./style.css?v=3.0">
-  <script src="./app.js?v=3.0" defer></script>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0c0f">
+  <meta name="description" content="DAILY OS — a calm space to plan, track and grow.">
+  <title>DAILY OS — Personal Command Center</title>
+  <link rel="stylesheet" href="style.css?v=4.0.0">
 </head>
 <body>
   <div class="app-shell">
     <aside class="sidebar" id="sidebar">
-      <div class="brand">
-        <div class="brand-mark">D</div>
-        <div>
-          <div class="brand-name">DAILY OS</div>
-          <div class="brand-subtitle">PERSONAL SYSTEM</div>
-        </div>
-      </div>
-
-      <div class="sidebar-label">WORKSPACE</div>
-      <nav class="nav-list">
-        <button class="nav-link active" data-page="today"><span>◷</span> Today</button>
-        <button class="nav-link" data-page="tasks"><span>▤</span> Tasks</button>
-        <button class="nav-link" data-page="habits"><span>◉</span> Habits</button>
-        <button class="nav-link" data-page="calendar"><span>▦</span> Calendar</button>
-        <button class="nav-link" data-page="analytics"><span>▥</span> Analytics</button>
-        <button class="nav-link" data-page="backup"><span>↥</span> Backup</button>
+      <a class="brand" href="#today" aria-label="DAILY OS home">
+        <span class="brand-mark">D</span><span class="brand-copy"><strong>DAILY OS</strong><small>PERSONAL COMMAND CENTER</small></span>
+      </a>
+      <div class="side-label">WORKSPACE</div>
+      <nav class="nav-list" aria-label="Main navigation">
+        <button class="nav-item active" data-view="today"><span class="nav-icon">◷</span>Today</button>
+        <button class="nav-item" data-view="tasks"><span class="nav-icon">☷</span>Tasks</button>
+        <button class="nav-item" data-view="habits"><span class="nav-icon">◇</span>Habits</button>
+        <button class="nav-item" data-view="goals"><span class="nav-icon">◎</span>Goals</button>
+        <button class="nav-item" data-view="calendar"><span class="nav-icon">▦</span>Calendar</button>
+        <button class="nav-item" data-view="analytics"><span class="nav-icon">▥</span>Analytics</button>
       </nav>
-
       <div class="sidebar-bottom">
-        <div class="quote-mark">“</div>
-        <p>Small steps.<br>Every single day.</p>
-        <span>DISCIPLINE OVER MOTIVATION</span>
+        <div class="quote-card"><span class="quote-mark">“</span><p>Small steps, every day.</p><small>CONSISTENCY OVER INTENSITY</small></div>
+        <button class="nav-item" data-view="backup"><span class="nav-icon">↥</span>Backup & Settings</button>
+        <div class="sidebar-foot">VERSION 4.0 <span>•</span> BUILT FOR FOCUS</div>
       </div>
     </aside>
 
     <main class="main-content">
       <header class="topbar">
-        <button class="mobile-menu" id="mobile-menu" aria-label="Open menu">☰</button>
-        <div>
-          <div class="topbar-label">PERSONAL PRODUCTIVITY</div>
-          <div class="topbar-date" id="header-date"></div>
-        </div>
-        <div class="topbar-right">
-          <span class="status-dot"></span>
-          <span>SYSTEM ACTIVE</span>
-        </div>
+        <button class="mobile-menu icon-button" id="mobileMenu" aria-label="Open navigation">☰</button>
+        <div class="breadcrumb"><span>DAILY OS</span><i>/</i><strong id="crumbCurrent">Today</strong></div>
+        <div class="top-actions"><span class="today-date" id="headerDate"></span><button class="avatar" aria-label="Profile">D</button></div>
       </header>
-
-      <div id="main-content" class="page-content"></div>
-
-      <footer class="footer">
-        <span>DAILY OS</span>
-        <span>BUILD YOUR DAY. BUILD YOURSELF.</span>
-      </footer>
+      <section class="page-wrap">
+        <div id="viewRoot" aria-live="polite"></div>
+      </section>
+      <footer class="main-footer">MOVE WITH INTENTION <span>·</span> BUILD WITH DISCIPLINE</footer>
     </main>
   </div>
 
-  <div class="toast" id="toast" role="status"></div>
-  <div class="modal-backdrop" id="modal-backdrop">
-    <div class="modal" id="modal"></div>
+  <div class="modal-backdrop" id="modalBackdrop" hidden>
+    <section class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <div class="modal-head"><div><span class="eyebrow" id="modalEyebrow">DAILY OS</span><h2 id="modalTitle">New item</h2></div><button class="icon-button" id="modalClose" aria-label="Close">×</button></div>
+      <form id="modalForm"><div id="modalFields" class="form-grid"></div><div class="modal-actions"><button type="button" class="btn btn-ghost" id="modalCancel">Cancel</button><button type="submit" class="btn btn-primary" id="modalSubmit">Save changes</button></div></form>
+    </section>
   </div>
+  <input class="file-input" type="file" id="importFile" accept="application/json,.json" hidden>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="app.js?v=4.0.0" defer></script>
 </body>
 </html>
