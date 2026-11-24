@@ -1299,10 +1299,24 @@
   });
 
   // MOBILE SIDEBAR
-  $('#mobileMenu').addEventListener('click',() =>
-    $('#sidebar').classList.toggle('open')
-  );
+document.addEventListener('click', (event) => {
+  const menuButton = event.target.closest('#mobileMenu');
 
+  if (!menuButton) return;
+
+  const sidebar = document.getElementById('sidebar');
+
+  if (!sidebar) return;
+
+  const isOpen = sidebar.classList.toggle('open');
+
+  menuButton.setAttribute('aria-expanded', String(isOpen));
+  menuButton.setAttribute(
+    'aria-label',
+    isOpen ? 'Close navigation' : 'Open navigation'
+  );
+});
+  );
   // BACKUP IMPORT
   $('#importFile').addEventListener('change',e => {
     importBackup(e.target.files?.[0]);
