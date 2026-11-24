@@ -1,1577 +1,792 @@
-
-/* =========================================
-   DAILY OS — Core App
-   Version 2.0
-   Tasks | Habits | Analytics | Backup
-   ========================================= */
-
+/* =========================================================
+   DAILY OS — Complete Personal Productivity System
+   Version 3.0
+   Today | Tasks | Habits | Calendar | Analytics | Backup
+   ========================================================= */
 "use strict";
 
-// =========================================
-// 1. CONFIGURATION
-// =========================================
-
-const pages = ["Today", "Tasks", "Habits", "Analytics"];
-
+/* ----------------------------- CONFIG ----------------------------- */
+const APP_VERSION = "3.0";
 const STORAGE_KEY = "daily-os-data";
-const BACKUP_VERSION = 2;
+const BACKUP_VERSION = 3;
+const PAGES = ["Today", "Tasks", "Habits", "Calendar", "Analytics"];
+const PRIORITIES = ["High", "Medium", "Low"];
+const CATEGORIES = ["Personal", "Study", "Trading", "Basketball", "Health"];
 
-const TASK_PRIORITIES = ["High", "Medium", "Low"];
-
-const TASK_CATEGORIES = [
-  "Personal",
-  "Study",
-  "Trading",
-  "Basketball",
-  "Health"
-];
-
-let data = {
-  tasks: [],
-  habits: []
-};
-
-let header = null;
-let main = null;
-let navigation = null;
+let data = { tasks: [], habits: [] };
+let headerEl, mainEl, navEl;
 let currentPage = "Today";
 let editingTaskId = null;
+let editingHabitId = null;
+let taskFilters = { search: "", category: "All", priority: "All", status: "Active" };
+let calendarMode = "Month";
+let calendarCursor = new Date();
+let selectedCalendarDate = todayKey();
 
-// =========================================
-// 2. DATE AND ID HELPERS
-// =========================================
-
-function getTodayKey() {
-  const date = new Date();
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-
-  return `${year}-${month}-${day}`;
+/* ----------------------------- DATE HELPERS ----------------------------- */
+function todayKey() {
+  const d = new Date();
+  return dateKeyFromParts(d.getFullYear(), d.getMonth() + 1, d.getDate());
 }
-
+function dateKeyFromParts(y, m, d) {
+  return `${String(y).padStart(4, "0")}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
 function isValidDateKey(value) {
-  if (typeof value !== "string") return false;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-
-  const date = new Date(`${value}T00:00:00`);
-
-  return !Number.isNaN(date.getTime()) &&
-    date.toISOString().slice(0, 10) === value;
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [y, m, d] = value.split("-").map(Number);
+  const date = new Date(y, m - 1, d);
+  return date.getFullYear() === y && date.getMonth() === m - 1 && date.getDate() === d;
 }
-
-function formatDate(value) {
-  if (!isValidDateKey(value)) return "";
-
-  const date = new Date(`${value}T00:00:00`);
-
-  return date.toLocaleDateString("en-US", {
-    day: "numeric",
-    month: "short",
-    year: "numeric"
-  });
+function dateFromKey(key) {
+  if (!isValidDateKey(key)) return new Date();
+  const [y, m, d] = key.split("-").map(Number);
+  return new Date(y, m - 1, d, 12, 0, 0, 0);
 }
-
+function keyFromDate(date) {
+  return dateKeyFromParts(date.getFullYear(), date.getMonth() + 1, date.getDate());
+}
+function addDays(key, amount) {
+  const d = dateFromKey(key);
+  d.setDate(d.getDate() + amount);
+  return keyFromDate(d);
+}
+function formatDate(key, options = { day: "numeric", month: "short", year: "numeric" }) {
+  if (!isValidDateKey(key)) return "No date";
+  return dateFromKey(key).toLocaleDateString(undefined, options);
+}
+function monthTitle(date) {
+  return date.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+}
+function startOfWeek(key) {
+  const d = dateFromKey(key);
+  const day = (d.getDay() + 6) % 7;
+  d.setDate(d.getDate() - day);
+  return keyFromDate(d);
+}
+function daysInMonth(year, monthIndex) {
+  return new Date(year, monthIndex + 1, 0).getDate();
+}
 function createId() {
-  if (
-    typeof crypto !== "undefined" &&
-    typeof crypto.randomUUID === "function"
-  ) {
-    return crypto.randomUUID();
-  }
-
-  return "id-" + Date.now() + "-" +
-    Math.random().toString(36).slice(2);
+  if (window.crypto && typeof window.crypto.randomUUID === "function") return window.crypto.randomUUID();
+  return `id-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-// =========================================
-// 3. TASK NORMALIZATION
-// =========================================
-
+/* ----------------------------- DATA MODEL ----------------------------- */
 function normalizeTask(task) {
   return {
-    id: typeof task.id === "string" && task.id
-      ? task.id
-      : createId(),
-
-    title: task.title.trim(),
-
+    id: typeof task.id === "string" && task.id ? task.id : createId(),
+    title: String(task.title || "").trim(),
     completed: task.completed === true,
-
-    createdAt: isValidDateKey(task.createdAt)
-      ? task.createdAt
-      : getTodayKey(),
-
-    priority: TASK_PRIORITIES.includes(task.priority)
-      ? task.priority
-      : "Medium",
-
-    category: TASK_CATEGORIES.includes(task.category)
-      ? task.category
-      : "Personal",
-
-    dueDate: isValidDateKey(task.dueDate)
-      ? task.dueDate
-      : ""
+    createdAt: isValidDateKey(task.createdAt) ? task.createdAt : todayKey(),
+    completedAt: isValidDateKey(task.completedAt) ? task.completedAt : "",
+    priority: PRIORITIES.includes(task.priority) ? task.priority : "Medium",
+    category: CATEGORIES.includes(task.category) ? task.category : "Personal",
+    dueDate: isValidDateKey(task.dueDate) ? task.dueDate : ""
   };
 }
-
-// =========================================
-// 4. DATA MANAGEMENT
-// =========================================
-
-function loadData() {
-  const emptyData = {
-    tasks: [],
-    habits: []
+function normalizeHabit(habit) {
+  const dates = Array.isArray(habit.completedDates) ? habit.completedDates : [];
+  return {
+    id: typeof habit.id === "string" && habit.id ? habit.id : createId(),
+    title: String(habit.title || "").trim(),
+    createdAt: isValidDateKey(habit.createdAt) ? habit.createdAt : todayKey(),
+    completedDates: [...new Set(dates.filter(isValidDateKey))]
   };
-
+}
+function normalizeData(raw) {
+  if (!raw || typeof raw !== "object") throw new Error("The data file has an invalid structure.");
+  const tasks = Array.isArray(raw.tasks) ? raw.tasks.filter(x => x && typeof x.title === "string" && x.title.trim()).map(normalizeTask) : [];
+  const habits = Array.isArray(raw.habits) ? raw.habits.filter(x => x && typeof x.title === "string" && x.title.trim()).map(normalizeHabit) : [];
+  return { tasks, habits };
+}
+function loadData() {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
-
-    if (!saved) return emptyData;
-
+    if (!saved) return { tasks: [], habits: [] };
     const parsed = JSON.parse(saved);
-
-    if (!parsed || typeof parsed !== "object") {
-      return emptyData;
-    }
-
-    const tasks = Array.isArray(parsed.tasks)
-      ? parsed.tasks
-          .filter(task =>
-            task &&
-            typeof task.title === "string" &&
-            task.title.trim().length > 0
-          )
-          .map(normalizeTask)
-      : [];
-
-    const habits = Array.isArray(parsed.habits)
-      ? parsed.habits
-          .filter(habit =>
-            habit &&
-            typeof habit.title === "string"
-          )
-          .map(habit => ({
-            id: habit.id || createId(),
-            title: habit.title,
-            completedDates: Array.isArray(habit.completedDates)
-              ? habit.completedDates.filter(
-                  date => typeof date === "string" &&
-                    isValidDateKey(date)
-                )
-              : []
-          }))
-      : [];
-
-    return { tasks, habits };
-
+    return normalizeData(parsed);
   } catch (error) {
-    console.error("DAILY OS: Could not load data:", error);
-    return emptyData;
+    console.error("DAILY OS: Data load failed; original local data was left untouched.", error);
+    showToast("Could not read saved data. The stored data has not been deleted.", "error");
+    return { tasks: [], habits: [] };
   }
 }
-
 function saveData() {
   try {
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify(data)
-    );
-
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
     return true;
-
   } catch (error) {
-    console.error("DAILY OS: Could not save data:", error);
-
-    alert(
-      "Unable to save data. Please check browser storage."
-    );
-
+    console.error("DAILY OS: Save failed.", error);
+    showToast("Could not save. Check available browser storage.", "error");
     return false;
   }
 }
 
-// =========================================
-// 5. BACKUP DATA VALIDATION
-// =========================================
-
-function validateBackupData(backupData) {
-  if (
-    !backupData ||
-    typeof backupData !== "object" ||
-    !Array.isArray(backupData.tasks) ||
-    !Array.isArray(backupData.habits)
-  ) {
-    throw new Error(
-      "Invalid backup structure. Tasks and Habits are required."
-    );
+/* ----------------------------- DOM HELPERS ----------------------------- */
+function el(tag, className = "", text = "") {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== "") node.textContent = text;
+  return node;
+}
+function button(text, className = "button button-secondary", onClick, type = "button") {
+  const node = el("button", className, text);
+  node.type = type;
+  if (onClick) node.addEventListener("click", onClick);
+  return node;
+}
+function card(title, subtitle = "") {
+  const node = el("section", "card");
+  if (title) {
+    const head = el("div", "card-heading");
+    head.appendChild(el("h3", "section-title", title));
+    if (subtitle) head.appendChild(el("p", "muted small", subtitle));
+    node.appendChild(head);
   }
-
-  const invalidTask = backupData.tasks.some(task =>
-    !task ||
-    typeof task !== "object" ||
-    typeof task.title !== "string" ||
-    !task.title.trim()
-  );
-
-  if (invalidTask) {
-    throw new Error("Backup contains an invalid task.");
-  }
-
-  const invalidTaskFields = backupData.tasks.some(task =>
-    (
-      task.priority !== undefined &&
-      !TASK_PRIORITIES.includes(task.priority)
-    ) ||
-    (
-      task.category !== undefined &&
-      !TASK_CATEGORIES.includes(task.category)
-    ) ||
-    (
-      task.dueDate !== undefined &&
-      task.dueDate !== "" &&
-      !isValidDateKey(task.dueDate)
-    )
-  );
-
-  if (invalidTaskFields) {
-    throw new Error("Backup contains invalid task details.");
-  }
-
-  const invalidHabit = backupData.habits.some(habit =>
-    !habit ||
-    typeof habit !== "object" ||
-    typeof habit.title !== "string" ||
-    (
-      habit.completedDates !== undefined &&
-      !Array.isArray(habit.completedDates)
-    )
-  );
-
-  if (invalidHabit) {
-    throw new Error("Backup contains an invalid habit.");
-  }
-
-  const invalidHabitDates = backupData.habits.some(habit =>
-    Array.isArray(habit.completedDates) &&
-    habit.completedDates.some(
-      date => !isValidDateKey(date)
-    )
-  );
-
-  if (invalidHabitDates) {
-    throw new Error("Backup contains invalid habit dates.");
-  }
-
-  return true;
+  return node;
 }
-
-// =========================================
-// 6. BACKUP DATA NORMALIZATION
-// =========================================
-
-function normalizeBackupData(backupData) {
-  validateBackupData(backupData);
-
-  const tasks = backupData.tasks.map(normalizeTask);
-
-  const habits = backupData.habits.map(habit => ({
-    id: habit.id || createId(),
-    title: habit.title,
-    completedDates: Array.isArray(habit.completedDates)
-      ? [...habit.completedDates]
-      : []
-  }));
-
-  return {
-    tasks,
-    habits
-  };
+function field(labelText, control) {
+  const wrap = el("label", "field");
+  wrap.append(el("span", "field-label", labelText), control);
+  return wrap;
 }
-
-// =========================================
-// 7. BACKUP EXPORT
-// =========================================
-
-function exportBackup() {
-  try {
-    const backup = {
-      app: "DAILY OS",
-      backupVersion: BACKUP_VERSION,
-      exportedAt: new Date().toISOString(),
-      data: JSON.parse(JSON.stringify(data))
-    };
-
-    const json = JSON.stringify(backup, null, 2);
-
-    const blob = new Blob(
-      [json],
-      { type: "application/json" }
-    );
-
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-
-    link.href = url;
-    link.download = `daily-os-backup-${getTodayKey()}.json`;
-    link.style.display = "none";
-
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-
-    setTimeout(() => {
-      URL.revokeObjectURL(url);
-    }, 1000);
-
-  } catch (error) {
-    console.error("DAILY OS: Backup export failed:", error);
-
-    alert("Unable to export backup. Please try again.");
-  }
+function input(type, value = "", placeholder = "") {
+  const node = document.createElement("input");
+  node.type = type;
+  node.value = value;
+  node.placeholder = placeholder;
+  node.className = "control";
+  return node;
 }
-
-// =========================================
-// 8. BACKUP IMPORT
-// =========================================
-
-function importBackupFile(file) {
-  if (!file) return;
-
-  const reader = new FileReader();
-
-  reader.onload = () => {
-    try {
-      const parsed = JSON.parse(reader.result);
-
-      let backupData;
-
-      if (parsed && parsed.app === "DAILY OS") {
-        if (
-          !Number.isInteger(parsed.backupVersion) ||
-          parsed.backupVersion < 1 ||
-          parsed.backupVersion > BACKUP_VERSION
-        ) {
-          throw new Error("Unsupported backup version.");
-        }
-
-        backupData = parsed.data;
-      } else {
-        // Support older { tasks, habits } backup format.
-        backupData = parsed;
-      }
-
-      const importedData = normalizeBackupData(backupData);
-
-      const confirmed = window.confirm(
-        "Import this backup?\n\n" +
-        `Tasks: ${importedData.tasks.length}\n` +
-        `Habits: ${importedData.habits.length}\n\n` +
-        "WARNING: Your current Tasks and Habits " +
-        "will be replaced by the backup."
-      );
-
-      if (!confirmed) return;
-
-      const previousData = data;
-      data = importedData;
-
-      if (!saveData()) {
-        data = previousData;
-        return;
-      }
-
-      editingTaskId = null;
-
-      alert(
-        "Backup imported successfully!\n\n" +
-        `Tasks: ${data.tasks.length}\n` +
-        `Habits: ${data.habits.length}`
-      );
-
-      showPage(currentPage);
-
-    } catch (error) {
-      console.error("DAILY OS: Backup import failed:", error);
-
-      alert(
-        "Backup import failed.\n\n" +
-        (error.message || "Invalid backup file.") +
-        "\n\nYour current data has not been intentionally replaced."
-      );
-    }
-  };
-
-  reader.onerror = () => {
-    alert("Unable to read this file. Please try another backup file.");
-  };
-
-  reader.readAsText(file);
-}
-
-// =========================================
-// 9. GENERAL HELPERS
-// =========================================
-
-function createElement(tag, className, text) {
-  const element = document.createElement(tag);
-
-  if (className) element.className = className;
-
-  if (text !== undefined) {
-    element.textContent = text;
-  }
-
-  return element;
-}
-
-function applyStyles(element, styles) {
-  Object.assign(element.style, styles);
-  return element;
-}
-
-function createCard(title) {
-  const card = createElement("section", "card");
-  const heading = createElement("h2", "section-title", title);
-
-  card.appendChild(heading);
-
-  return card;
-}
-
-function createFieldLabel(text) {
-  return createElement("label", "secondary-text", text);
-}
-
-function createSelect(options, selectedValue) {
-  const select = document.createElement("select");
-
-  applyStyles(select, {
-    width: "100%",
-    minHeight: "44px",
-    padding: "10px",
-    borderRadius: "10px",
-    border: "1px solid #444",
-    background: "#171717",
-    color: "#fff",
-    fontSize: "14px"
-  });
-
+function select(options, value) {
+  const node = document.createElement("select");
+  node.className = "control";
   options.forEach(option => {
     const item = document.createElement("option");
     item.value = option;
     item.textContent = option;
-    select.appendChild(item);
+    node.appendChild(item);
   });
-
-  select.value = selectedValue;
-
-  return select;
+  node.value = value;
+  return node;
 }
-
-function createInput(type, placeholder) {
-  const input = document.createElement("input");
-
-  input.type = type;
-  input.placeholder = placeholder;
-
-  applyStyles(input, {
-    width: "100%",
-    minHeight: "44px",
-    boxSizing: "border-box",
-    padding: "10px",
-    borderRadius: "10px",
-    border: "1px solid #444",
-    background: "#171717",
-    color: "#fff",
-    fontSize: "14px"
-  });
-
-  return input;
+function pageIntro(eyebrow, title, description) {
+  const wrap = el("div", "page-intro");
+  wrap.append(el("p", "eyebrow", eyebrow), el("h2", "page-title", title));
+  if (description) wrap.appendChild(el("p", "muted page-description", description));
+  mainEl.appendChild(wrap);
 }
-
-function createActionButton(text, secondary = false) {
-  const button = createElement(
-    "button",
-    secondary ? "secondary-button" : "primary-button",
-    text
-  );
-
-  button.type = "button";
-
-  if (secondary) {
-    applyStyles(button, {
-      background: "#252525",
-      color: "#fff",
-      border: "1px solid #444",
-      borderRadius: "10px",
-      padding: "10px 14px",
-      cursor: "pointer"
-    });
+function showToast(message, type = "success") {
+  let toast = document.getElementById("app-toast");
+  if (!toast) {
+    toast = el("div");
+    toast.id = "app-toast";
+    toast.setAttribute("role", "status");
+    document.body.appendChild(toast);
   }
-
-  return button;
+  toast.className = `toast ${type}`;
+  toast.textContent = message;
+  clearTimeout(showToast.timer);
+  showToast.timer = setTimeout(() => toast.classList.remove("visible"), 2600);
+  toast.classList.add("visible");
+}
+function emptyState(title, text) {
+  const wrap = el("div", "empty-state");
+  wrap.append(el("strong", "", title), el("p", "muted small", text));
+  return wrap;
+}
+function progressBar(percent) {
+  const track = el("div", "progress-track");
+  const fill = el("div", "progress-fill");
+  fill.style.width = `${Math.max(0, Math.min(100, percent))}%`;
+  track.appendChild(fill);
+  return track;
+}
+function safeAppend(parent, ...children) {
+  children.filter(Boolean).forEach(child => parent.appendChild(child));
 }
 
-function getCompletedTasks() {
+/* ----------------------------- COUNTS / METRICS ----------------------------- */
+function completedTasksCount() {
   return data.tasks.filter(task => task.completed).length;
 }
-
-function getCompletedHabits() {
-  const today = getTodayKey();
-
-  return data.habits.filter(habit =>
-    habit.completedDates.includes(today)
-  ).length;
+function completedHabitsCount(key = todayKey()) {
+  return data.habits.filter(habit => habit.completedDates.includes(key)).length;
 }
-
-// =========================================
-// 10. ERROR DISPLAY
-// =========================================
-
-function showStartupError(error) {
-  console.error("DAILY OS STARTUP ERROR:", error);
-
-  if (!main) {
-    const fallback = createElement("main");
-    document.body.appendChild(fallback);
-    main = fallback;
+function habitStreak(habit) {
+  let cursor = todayKey();
+  if (!habit.completedDates.includes(cursor)) cursor = addDays(cursor, -1);
+  let count = 0;
+  while (habit.completedDates.includes(cursor)) {
+    count += 1;
+    cursor = addDays(cursor, -1);
   }
-
-  main.replaceChildren();
-
-  const card = createCard("DAILY OS Startup Error");
-
-  card.append(
-    createElement(
-      "p",
-      "secondary-text",
-      `${error.name}: ${error.message}`
-    ),
-    createElement(
-      "p",
-      "secondary-text",
-      "Please send this error message to ChatGPT."
-    )
-  );
-
-  main.appendChild(card);
+  return count;
+}
+function taskIsOverdue(task) {
+  return !!task.dueDate && !task.completed && task.dueDate < todayKey();
 }
 
-function showSetupError(message) {
-  console.error("DAILY OS SETUP ERROR:", message);
-
-  const card = createCard("DAILY OS Setup Error");
-
-  card.appendChild(
-    createElement("p", "secondary-text", message)
-  );
-
-  document.body.appendChild(card);
-}
-
-// =========================================
-// 11. APP INITIALIZATION
-// =========================================
-
-function startApp() {
-  try {
-    console.log("DAILY OS: Starting...");
-
-    header = document.getElementById("app-header");
-    main = document.getElementById("main-content");
-    navigation = document.getElementById("bottom-navigation");
-
-    if (!header || !main || !navigation) {
-      showSetupError(
-        "Missing HTML element. Check these IDs in index.html: " +
-        "app-header, main-content, bottom-navigation."
-      );
-      return;
-    }
-
-    data = loadData();
-
-    renderHeader();
-    renderNavigation();
-    showPage("Today");
-
-    console.log("DAILY OS: App started successfully.");
-
-  } catch (error) {
-    showStartupError(error);
-  }
-}
-
-if (document.readyState === "loading") {
-  document.addEventListener(
-    "DOMContentLoaded",
-    startApp,
-    { once: true }
-  );
-} else {
-  startApp();
-}
-
-// =========================================
-// 12. HEADER
-// =========================================
-
+/* ----------------------------- HEADER / NAV ----------------------------- */
 function renderHeader() {
-  header.replaceChildren();
-
-  const wrapper = createElement("div", "header-content");
-  const titleGroup = createElement("div");
-
-  const eyebrow = createElement(
-    "p",
-    "eyebrow",
-    "YOUR PERSONAL SYSTEM"
-  );
-
-  const title = createElement(
-    "h1",
-    "page-title",
-    "DAILY OS"
-  );
-
-  titleGroup.append(eyebrow, title);
-
-  const dateElement = createElement("div", "header-date");
-
-  dateElement.id = "header-date";
-
-  dateElement.textContent = new Date().toLocaleDateString(
-    "en-US",
-    {
-      weekday: "short",
-      month: "short",
-      day: "numeric"
-    }
-  );
-
-  wrapper.append(titleGroup, dateElement);
-  header.appendChild(wrapper);
+  headerEl.replaceChildren();
+  const left = el("div", "brand-lockup");
+  left.append(el("p", "eyebrow", "YOUR PERSONAL SYSTEM"), el("h1", "brand-title", "DAILY OS"));
+  const right = el("div", "header-right");
+  right.append(el("span", "header-date", formatDate(todayKey(), { weekday: "short", month: "short", day: "numeric" })));
+  headerEl.append(left, right);
 }
-
-// =========================================
-// 13. NAVIGATION
-// =========================================
-
 function renderNavigation() {
-  navigation.replaceChildren();
-
-  pages.forEach(page => {
-    const button = document.createElement("button");
-
-    button.type = "button";
-    button.className = "nav-item";
-    button.textContent = page;
-    button.dataset.page = page;
-
-    button.addEventListener("click", () => {
-      showPage(page);
-    });
-
-    navigation.appendChild(button);
+  navEl.replaceChildren();
+  const labels = {
+    Today: "Today",
+    Tasks: "Tasks",
+    Habits: "Habits",
+    Calendar: "Calendar",
+    Analytics: "Analytics"
+  };
+  PAGES.forEach(page => {
+    const b = button(labels[page], "nav-item", () => showPage(page));
+    b.dataset.page = page;
+    b.setAttribute("aria-label", page);
+    navEl.appendChild(b);
   });
 }
-
 function showPage(page) {
-  if (!pages.includes(page)) {
-    console.error("DAILY OS: Unknown page:", page);
-    return;
-  }
-
-  try {
-    currentPage = page;
-
-    navigation.querySelectorAll(".nav-item").forEach(button => {
-      const isActive = button.dataset.page === page;
-
-      button.classList.toggle("active", isActive);
-
-      if (isActive) {
-        button.setAttribute("aria-current", "page");
-      } else {
-        button.removeAttribute("aria-current");
-      }
-    });
-
-    if (page !== "Tasks") {
-      editingTaskId = null;
-    }
-
-    if (page === "Today") renderToday();
-    else if (page === "Tasks") renderTasks();
-    else if (page === "Habits") renderHabits();
-    else if (page === "Analytics") renderAnalytics();
-
-  } catch (error) {
-    showStartupError(error);
-  }
-}
-
-// =========================================
-// 14. TODAY PAGE
-// =========================================
-
-function renderToday() {
-  main.replaceChildren();
-
-  main.append(
-    createElement("p", "eyebrow", "FOCUS ON WHAT MATTERS"),
-    createElement("h2", "page-title", "Make today count."),
-    createElement(
-      "p",
-      "secondary-text",
-      "Small actions. Consistent progress."
-    )
-  );
-
-  const totalItems = data.tasks.length + data.habits.length;
-
-  const completedItems =
-    getCompletedTasks() + getCompletedHabits();
-
-  const percentage = totalItems === 0
-    ? 0
-    : Math.round((completedItems / totalItems) * 100);
-
-  const progressCard = createCard("DAILY PROGRESS");
-
-  progressCard.appendChild(
-    createElement("p", "progress-text", `${percentage}% completed`)
-  );
-
-  const track = createElement("div", "progress-track");
-  const bar = createElement("div", "progress-bar");
-
-  track.style.cssText =
-    "height:8px;background:#303030;border-radius:10px;overflow:hidden;";
-
-  bar.style.cssText =
-    "height:100%;background:#fff;border-radius:10px;transition:width .2s ease;";
-
-  bar.style.width = `${percentage}%`;
-
-  track.appendChild(bar);
-
-  progressCard.append(
-    track,
-    createElement(
-      "p",
-      "secondary-text",
-      `${completedItems} of ${totalItems} items completed`
-    )
-  );
-
-  main.appendChild(progressCard);
-
-  const taskCard = createCard("TODAY'S TASKS");
-
-  const pendingTasks = data.tasks.filter(task => !task.completed);
-
-  if (pendingTasks.length === 0) {
-    taskCard.appendChild(
-      createElement(
-        "p",
-        "secondary-text",
-        "No pending tasks. Add a task to get started."
-      )
-    );
-  } else {
-    const list = createElement("div", "task-list");
-
-    pendingTasks.slice(0, 3).forEach(task => {
-      list.appendChild(createTaskItem(task));
-    });
-
-    taskCard.appendChild(list);
-  }
-
-  main.appendChild(taskCard);
-
-  const habitCard = createCard("DAILY HABITS");
-
-  if (data.habits.length === 0) {
-    habitCard.appendChild(
-      createElement(
-        "p",
-        "secondary-text",
-        "No habits yet. Start building your routine."
-      )
-    );
-  } else {
-    const list = createElement("div", "habit-list");
-
-    data.habits.forEach(habit => {
-      list.appendChild(createHabitItem(habit));
-    });
-
-    habitCard.appendChild(list);
-  }
-
-  main.appendChild(habitCard);
-}
-
-// =========================================
-// 15. TASKS PAGE — VERSION 2.0
-// =========================================
-
-function renderTasks() {
-  main.replaceChildren();
-
-  main.append(
-    createElement("p", "eyebrow", "GET THINGS DONE"),
-    createElement("h2", "page-title", "Tasks"),
-    createElement(
-      "p",
-      "secondary-text",
-      "Organize your work. Focus on what matters."
-    )
-  );
-
-  const editingTask = editingTaskId
-    ? data.tasks.find(task => task.id === editingTaskId)
-    : null;
-
-  if (editingTaskId && !editingTask) {
-    editingTaskId = null;
-  }
-
-  const form = document.createElement("form");
-  form.className = "card";
-
-  const formTitle = createElement(
-    "h3",
-    "section-title",
-    editingTask ? "EDIT TASK" : "NEW TASK"
-  );
-
-  const titleInput = createInput(
-    "text",
-    "Write a new task..."
-  );
-
-  titleInput.maxLength = 120;
-  titleInput.required = true;
-  titleInput.setAttribute("aria-label", "Task title");
-
-  titleInput.value = editingTask ? editingTask.title : "";
-
-  const fields = applyStyles(
-    createElement("div", "task-fields"),
-    {
-      display: "grid",
-      gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))",
-      gap: "12px",
-      marginTop: "14px"
-    }
-  );
-
-  const priorityField = createElement("div", "task-field");
-  const priorityLabel = createFieldLabel("PRIORITY");
-
-  const prioritySelect = createSelect(
-    TASK_PRIORITIES,
-    editingTask ? editingTask.priority : "Medium"
-  );
-
-  priorityField.append(priorityLabel, prioritySelect);
-
-  const categoryField = createElement("div", "task-field");
-  const categoryLabel = createFieldLabel("CATEGORY");
-
-  const categorySelect = createSelect(
-    TASK_CATEGORIES,
-    editingTask ? editingTask.category : "Personal"
-  );
-
-  categoryField.append(categoryLabel, categorySelect);
-
-  const dateField = createElement("div", "task-field");
-  const dateLabel = createFieldLabel("DUE DATE");
-
-  const dateInput = createInput("date", "");
-  dateInput.setAttribute("aria-label", "Task due date");
-
-  dateInput.value = editingTask ? editingTask.dueDate : "";
-
-  dateField.append(dateLabel, dateInput);
-
-  [priorityLabel, categoryLabel, dateLabel].forEach(label => {
-    label.style.display = "block";
-    label.style.marginBottom = "6px";
-    label.style.fontSize = "11px";
-    label.style.letterSpacing = "1px";
+  if (!PAGES.includes(page)) return;
+  currentPage = page;
+  if (page !== "Tasks") editingTaskId = null;
+  if (page !== "Habits") editingHabitId = null;
+  navEl.querySelectorAll(".nav-item").forEach(item => {
+    const active = item.dataset.page === page;
+    item.classList.toggle("active", active);
+    if (active) item.setAttribute("aria-current", "page");
+    else item.removeAttribute("aria-current");
   });
-
-  fields.append(priorityField, categoryField, dateField);
-
-  const formActions = applyStyles(
-    createElement("div", "task-form-actions"),
-    {
-      display: "flex",
-      gap: "10px",
-      flexWrap: "wrap",
-      marginTop: "16px"
-    }
-  );
-
-  const submitButton = createActionButton(
-    editingTask ? "Save Changes" : "＋ Add Task"
-  );
-
-  submitButton.type = "submit";
-
-  formActions.appendChild(submitButton);
-
-  if (editingTask) {
-    const cancelButton = createActionButton("Cancel", true);
-
-    cancelButton.addEventListener("click", () => {
-      editingTaskId = null;
-      renderTasks();
-    });
-
-    formActions.appendChild(cancelButton);
+  try {
+    if (page === "Today") renderToday();
+    if (page === "Tasks") renderTasks();
+    if (page === "Habits") renderHabits();
+    if (page === "Calendar") renderCalendar();
+    if (page === "Analytics") renderAnalytics();
+  } catch (error) {
+    console.error("DAILY OS render error:", error);
+    mainEl.replaceChildren();
+    const c = card("Something went wrong");
+    c.appendChild(el("p", "muted", `${error.name}: ${error.message}`));
+    mainEl.appendChild(c);
   }
+}
 
-  form.append(
-    formTitle,
-    titleInput,
-    fields,
-    formActions
+/* ----------------------------- TASK COMPONENT ----------------------------- */
+function makeTaskRow(task, actions = true) {
+  const row = el("article", `task-row${task.completed ? " is-complete" : ""}`);
+  const check = input("checkbox");
+  check.checked = task.completed;
+  check.className = "check-control";
+  check.setAttribute("aria-label", `Complete task: ${task.title}`);
+  check.addEventListener("change", () => {
+    const old = task.completed;
+    task.completed = check.checked;
+    task.completedAt = check.checked ? todayKey() : "";
+    if (saveData()) showPage(currentPage);
+    else task.completed = old;
+  });
+  const body = el("div", "task-row-body");
+  body.appendChild(el("div", "task-row-title", task.title));
+  const meta = el("div", "meta-line");
+  const p = el("span", `pill priority-${task.priority.toLowerCase()}`, task.priority);
+  const c = el("span", "pill pill-neutral", task.category);
+  meta.append(p, c);
+  if (task.dueDate) {
+    const dueLabel = taskIsOverdue(task) ? `Overdue · ${formatDate(task.dueDate)}` : `Due · ${formatDate(task.dueDate)}`;
+    meta.appendChild(el("span", `due-label${taskIsOverdue(task) ? " overdue" : ""}`, dueLabel));
+  }
+  body.appendChild(meta);
+  row.append(check, body);
+  if (actions) {
+    const actionWrap = el("div", "row-actions");
+    actionWrap.append(
+      button("Edit", "text-button", () => { editingTaskId = task.id; renderTasks(); }),
+      button("Delete", "text-button danger-text", () => {
+        if (!confirm(`Delete "${task.title}"?`)) return;
+        const previous = data.tasks;
+        data.tasks = data.tasks.filter(item => item.id !== task.id);
+        if (saveData()) { showToast("Task deleted."); renderTasks(); }
+        else data.tasks = previous;
+      })
+    );
+    row.appendChild(actionWrap);
+  }
+  return row;
+}
+
+/* ----------------------------- TODAY ----------------------------- */
+function renderToday() {
+  mainEl.replaceChildren();
+  pageIntro("FOCUS ON WHAT MATTERS", "Make today count.", "Small actions. Consistent progress.");
+  const total = data.tasks.length + data.habits.length;
+  const done = completedTasksCount() + completedHabitsCount();
+  const pct = total ? Math.round(done / total * 100) : 0;
+  const summary = card("DAILY PROGRESS", `${formatDate(todayKey(), { weekday: "long", month: "long", day: "numeric" })}`);
+  const metric = el("div", "progress-summary");
+  metric.append(el("strong", "progress-number", `${pct}%`), el("span", "muted", `${done} of ${total} items complete`));
+  summary.append(metric, progressBar(pct));
+  const stats = el("div", "mini-stats");
+  stats.append(
+    miniStat("OPEN TASKS", String(data.tasks.filter(t => !t.completed).length)),
+    miniStat("HABITS DONE", `${completedHabitsCount()}/${data.habits.length}`),
+    miniStat("OVERDUE", String(data.tasks.filter(taskIsOverdue).length))
   );
+  summary.appendChild(stats);
+  mainEl.appendChild(summary);
 
+  const tasksCard = card("TODAY'S FOCUS", "Your next actions");
+  const todayTasks = data.tasks.filter(t => !t.completed && (!t.dueDate || t.dueDate <= todayKey())).slice(0, 5);
+  if (!todayTasks.length) tasksCard.appendChild(emptyState("Clear space.", "No tasks due today. Add a task or enjoy the breathing room."));
+  else todayTasks.forEach(task => tasksCard.appendChild(makeTaskRow(task, false)));
+  tasksCard.appendChild(button("View all tasks", "button button-secondary full-button", () => showPage("Tasks")));
+  mainEl.appendChild(tasksCard);
+
+  const habitsCard = card("DAILY HABITS", "Consistency is built one day at a time");
+  if (!data.habits.length) habitsCard.appendChild(emptyState("Start small.", "Add one habit you want to make consistent."));
+  else data.habits.forEach(habit => habitsCard.appendChild(makeHabitRow(habit, false)));
+  habitsCard.appendChild(button("Manage habits", "button button-secondary full-button", () => showPage("Habits")));
+  mainEl.appendChild(habitsCard);
+
+  const overdue = data.tasks.filter(taskIsOverdue);
+  if (overdue.length) {
+    const overdueCard = card("NEEDS ATTENTION", `${overdue.length} overdue task${overdue.length > 1 ? "s" : ""}`);
+    overdue.slice(0, 3).forEach(task => overdueCard.appendChild(makeTaskRow(task, false)));
+    mainEl.appendChild(overdueCard);
+  }
+}
+function miniStat(label, value) {
+  const box = el("div", "mini-stat");
+  box.append(el("span", "eyebrow", label), el("strong", "", value));
+  return box;
+}
+
+/* ----------------------------- TASKS ----------------------------- */
+function renderTasks() {
+  mainEl.replaceChildren();
+  pageIntro("PLAN WITH INTENTION", "Tasks", "Capture the work. Set priorities. Follow through.");
+  const editing = editingTaskId ? data.tasks.find(t => t.id === editingTaskId) : null;
+  if (editingTaskId && !editing) editingTaskId = null;
+
+  const formCard = card(editing ? "EDIT TASK" : "NEW TASK", "Keep the next action clear and specific.");
+  const form = el("form", "task-form");
+  const title = input("text", editing ? editing.title : "", "What needs to get done?");
+  title.maxLength = 120;
+  title.required = true;
+  title.setAttribute("aria-label", "Task title");
+  const priority = select(PRIORITIES, editing ? editing.priority : "Medium");
+  const category = select(CATEGORIES, editing ? editing.category : "Personal");
+  const due = input("date", editing ? editing.dueDate : "");
+  const fields = el("div", "form-grid");
+  fields.append(field("PRIORITY", priority), field("CATEGORY", category), field("DUE DATE", due));
+  const actions = el("div", "form-actions");
+  actions.appendChild(button(editing ? "Save changes" : "＋ Add task", "button button-primary", null, "submit"));
+  if (editing) actions.appendChild(button("Cancel", "button button-secondary", () => { editingTaskId = null; renderTasks(); }));
+  form.append(title, fields, actions);
   form.addEventListener("submit", event => {
     event.preventDefault();
-
-    const title = titleInput.value.trim();
-
-    if (!title) {
-      titleInput.focus();
-      return;
-    }
-
-    const previousData = JSON.parse(JSON.stringify(data));
-
-    if (editingTask) {
-      const task = data.tasks.find(
-        entry => entry.id === editingTask.id
-      );
-
-      if (!task) return;
-
-      task.title = title;
-      task.priority = prioritySelect.value;
-      task.category = categorySelect.value;
-      task.dueDate = dateInput.value || "";
-
+    const taskTitle = title.value.trim();
+    if (!taskTitle) { title.focus(); return; }
+    const previous = JSON.stringify(data);
+    if (editing) {
+      const target = data.tasks.find(t => t.id === editing.id);
+      if (!target) return;
+      Object.assign(target, { title: taskTitle, priority: priority.value, category: category.value, dueDate: due.value || "" });
     } else {
-      data.tasks.push({
-        id: createId(),
-        title,
-        completed: false,
-        createdAt: getTodayKey(),
-        priority: prioritySelect.value,
-        category: categorySelect.value,
-        dueDate: dateInput.value || ""
-      });
+      data.tasks.unshift({ id: createId(), title: taskTitle, completed: false, createdAt: todayKey(), completedAt: "", priority: priority.value, category: category.value, dueDate: due.value || "" });
     }
-
-    if (!saveData()) {
-      data = previousData;
-      return;
-    }
-
+    if (!saveData()) { data = JSON.parse(previous); return; }
     editingTaskId = null;
+    showToast(editing ? "Task updated." : "Task added.");
     renderTasks();
   });
+  formCard.appendChild(form);
+  mainEl.appendChild(formCard);
 
-  main.appendChild(form);
-
-  const taskCard = createCard(
-    `ALL TASKS (${data.tasks.length})`
-  );
-
-  if (data.tasks.length === 0) {
-    taskCard.appendChild(
-      createElement(
-        "p",
-        "secondary-text",
-        "Your task list is empty."
-      )
-    );
-  } else {
-    const list = createElement("div", "task-list");
-
-    data.tasks.forEach(task => {
-      list.appendChild(createTaskItem(task, true));
-    });
-
-    taskCard.appendChild(list);
+  const controlsCard = card("TASK LIST", `${data.tasks.length} total`);
+  const controls = el("div", "filter-grid");
+  const search = input("search", taskFilters.search, "Search tasks...");
+  search.addEventListener("input", () => { taskFilters.search = search.value; renderTaskListInto(listWrap); });
+  const categoryFilter = select(["All", ...CATEGORIES], taskFilters.category);
+  categoryFilter.addEventListener("change", () => { taskFilters.category = categoryFilter.value; renderTaskListInto(listWrap); });
+  const priorityFilter = select(["All", ...PRIORITIES], taskFilters.priority);
+  priorityFilter.addEventListener("change", () => { taskFilters.priority = priorityFilter.value; renderTaskListInto(listWrap); });
+  const statusFilter = select(["Active", "Completed", "All"], taskFilters.status);
+  statusFilter.addEventListener("change", () => { taskFilters.status = statusFilter.value; renderTaskListInto(listWrap); });
+  controls.append(field("SEARCH", search), field("CATEGORY", categoryFilter), field("PRIORITY", priorityFilter), field("STATUS", statusFilter));
+  const listWrap = el("div", "task-list");
+  controlsCard.append(controls, listWrap);
+  renderTaskListInto(listWrap);
+  mainEl.appendChild(controlsCard);
+}
+function renderTaskListInto(container) {
+  container.replaceChildren();
+  const q = taskFilters.search.toLowerCase().trim();
+  const filtered = data.tasks.filter(task => {
+    const searchMatch = !q || task.title.toLowerCase().includes(q);
+    const categoryMatch = taskFilters.category === "All" || task.category === taskFilters.category;
+    const priorityMatch = taskFilters.priority === "All" || task.priority === taskFilters.priority;
+    const statusMatch = taskFilters.status === "All" || (taskFilters.status === "Completed" ? task.completed : !task.completed);
+    return searchMatch && categoryMatch && priorityMatch && statusMatch;
+  });
+  if (!filtered.length) {
+    container.appendChild(emptyState("No matching tasks.", "Try changing your filters or add a new task."));
+    return;
   }
-
-  main.appendChild(taskCard);
+  filtered.forEach(task => container.appendChild(makeTaskRow(task, true)));
 }
 
-// =========================================
-// 16. TASK ITEM
-// =========================================
-
-function createTaskItem(task, allowActions = false) {
-  const item = createElement("div", "task-item");
-
-  applyStyles(item, {
-    display: "flex",
-    alignItems: "center",
-    gap: "10px",
-    flexWrap: "wrap",
-    padding: "10px 0"
-  });
-
-  const checkbox = document.createElement("input");
-
-  checkbox.type = "checkbox";
-  checkbox.checked = task.completed;
-
-  checkbox.setAttribute(
-    "aria-label",
-    `Mark ${task.title} as ${task.completed ? "incomplete" : "complete"}`
-  );
-
-  checkbox.addEventListener("change", () => {
-    const previous = task.completed;
-
-    task.completed = checkbox.checked;
-
-    if (!saveData()) {
-      task.completed = previous;
-      checkbox.checked = previous;
-      return;
+/* ----------------------------- HABITS ----------------------------- */
+function makeHabitRow(habit, allowActions = true) {
+  const row = el("article", "habit-row");
+  const done = habit.completedDates.includes(todayKey());
+  const check = input("checkbox");
+  check.checked = done;
+  check.className = "check-control";
+  check.setAttribute("aria-label", `Mark ${habit.title} complete today`);
+  check.addEventListener("change", () => {
+    const previous = [...habit.completedDates];
+    if (check.checked) {
+      if (!habit.completedDates.includes(todayKey())) habit.completedDates.push(todayKey());
+    } else {
+      habit.completedDates = habit.completedDates.filter(date => date !== todayKey());
     }
-
-    showPage(currentPage);
+    if (saveData()) showPage(currentPage);
+    else habit.completedDates = previous;
   });
-
-  const info = applyStyles(
-    createElement("div", "task-information"),
-    {
-      flex: "1",
-      minWidth: "0"
-    }
-  );
-
-  const title = createElement("span", "task-title", task.title);
-
-  if (task.completed) {
-    title.classList.add("completed");
-  }
-
-  const metadata = applyStyles(
-    createElement("div", "task-metadata"),
-    {
-      display: "flex",
-      alignItems: "center",
-      gap: "6px",
-      flexWrap: "wrap",
-      marginTop: "6px"
-    }
-  );
-
-  const priority = createElement(
-    "span",
-    "task-priority",
-    task.priority
-  );
-
-  const priorityColors = {
-    High: {
-      color: "#ff8585",
-      background: "#3a2020"
-    },
-    Medium: {
-      color: "#e8c47c",
-      background: "#352e1e"
-    },
-    Low: {
-      color: "#bcbcbc",
-      background: "#292929"
-    }
-  };
-
-  applyStyles(priority, {
-    fontSize: "11px",
-    padding: "4px 8px",
-    borderRadius: "20px",
-    ...priorityColors[task.priority]
-  });
-
-  const category = createElement(
-    "span",
-    "task-category",
-    task.category
-  );
-
-  applyStyles(category, {
-    fontSize: "11px",
-    color: "#ccc",
-    background: "#292929",
-    padding: "4px 8px",
-    borderRadius: "20px"
-  });
-
-  metadata.append(priority, category);
-
-  if (task.dueDate) {
-    const isOverdue =
-      !task.completed && task.dueDate < getTodayKey();
-
-    const due = createElement(
-      "span",
-      "task-due-date",
-      `${isOverdue ? "Overdue · " : "Due · "}${formatDate(task.dueDate)}`
-    );
-
-    applyStyles(due, {
-      fontSize: "11px",
-      color: isOverdue ? "#ff8585" : "#aaa"
-    });
-
-    metadata.appendChild(due);
-  }
-
-  info.append(title, metadata);
-  item.append(checkbox, info);
-
+  const info = el("div", "habit-row-info");
+  info.append(el("strong", "", habit.title), el("span", "muted small", `${habitStreak(habit)} day streak`));
+  row.append(check, info);
   if (allowActions) {
-    const actions = applyStyles(
-      createElement("div", "task-actions"),
-      {
-        display: "flex",
-        gap: "6px",
-        alignItems: "center"
-      }
+    const actions = el("div", "row-actions");
+    actions.append(
+      button("Edit", "text-button", () => { editingHabitId = habit.id; renderHabits(); }),
+      button("Delete", "text-button danger-text", () => {
+        if (!confirm(`Delete habit "${habit.title}" and its history?`)) return;
+        const previous = data.habits;
+        data.habits = data.habits.filter(item => item.id !== habit.id);
+        if (saveData()) { showToast("Habit deleted."); renderHabits(); }
+        else data.habits = previous;
+      })
     );
-
-    const editButton = createActionButton("Edit", true);
-
-    editButton.addEventListener("click", () => {
-      editingTaskId = task.id;
-      renderTasks();
-    });
-
-    const deleteButton = createElement(
-      "button",
-      "delete-button",
-      "×"
-    );
-
-    deleteButton.type = "button";
-    deleteButton.setAttribute(
-      "aria-label",
-      `Delete ${task.title}`
-    );
-
-    deleteButton.addEventListener("click", () => {
-      const confirmed = window.confirm(
-        `Delete "${task.title}"?`
-      );
-
-      if (!confirmed) return;
-
-      const previousTasks = data.tasks;
-
-      data.tasks = data.tasks.filter(
-        entry => entry.id !== task.id
-      );
-
-      if (!saveData()) {
-        data.tasks = previousTasks;
-        return;
-      }
-
-      if (editingTaskId === task.id) {
-        editingTaskId = null;
-      }
-
-      renderTasks();
-    });
-
-    actions.append(editButton, deleteButton);
-    item.appendChild(actions);
+    row.appendChild(actions);
   }
-
-  return item;
+  return row;
 }
-
-// =========================================
-// 17. HABITS PAGE
-// =========================================
-
 function renderHabits() {
-  main.replaceChildren();
-
-  main.append(
-    createElement("p", "eyebrow", "BUILD YOUR ROUTINE"),
-    createElement("h2", "page-title", "Habits")
-  );
-
-  const form = document.createElement("form");
-  form.className = "card";
-
-  const input = document.createElement("input");
-
-  input.type = "text";
-  input.placeholder = "Example: Read 10 pages";
-  input.maxLength = 100;
-  input.required = true;
-  input.className = "habit-input";
-  input.setAttribute("aria-label", "New habit");
-
-  const addButton = createElement(
-    "button",
-    "primary-button",
-    "＋ Add Habit"
-  );
-
-  addButton.type = "submit";
-
-  form.append(input, addButton);
-
+  mainEl.replaceChildren();
+  pageIntro("BUILD YOUR ROUTINE", "Habits", "Small actions, repeated consistently, become part of who you are.");
+  const editing = editingHabitId ? data.habits.find(h => h.id === editingHabitId) : null;
+  if (editingHabitId && !editing) editingHabitId = null;
+  const formCard = card(editing ? "EDIT HABIT" : "NEW HABIT");
+  const form = el("form", "task-form");
+  const title = input("text", editing ? editing.title : "", "Example: Read 10 pages");
+  title.maxLength = 100;
+  title.required = true;
+  const actions = el("div", "form-actions");
+  actions.appendChild(button(editing ? "Save habit" : "＋ Add habit", "button button-primary", null, "submit"));
+  if (editing) actions.appendChild(button("Cancel", "button button-secondary", () => { editingHabitId = null; renderHabits(); }));
+  form.append(title, actions);
   form.addEventListener("submit", event => {
     event.preventDefault();
-
-    const title = input.value.trim();
-    if (!title) return;
-
-    const previousHabits = data.habits;
-
-    data.habits.push({
-      id: createId(),
-      title,
-      completedDates: []
-    });
-
-    if (saveData()) {
-      renderHabits();
+    const value = title.value.trim();
+    if (!value) return;
+    const previous = JSON.stringify(data);
+    if (editing) {
+      const target = data.habits.find(h => h.id === editing.id);
+      if (!target) return;
+      target.title = value;
     } else {
-      data.habits = previousHabits;
+      data.habits.push({ id: createId(), title: value, createdAt: todayKey(), completedDates: [] });
     }
+    if (!saveData()) { data = JSON.parse(previous); return; }
+    editingHabitId = null;
+    showToast(editing ? "Habit updated." : "Habit added.");
+    renderHabits();
   });
+  formCard.appendChild(form);
+  mainEl.appendChild(formCard);
 
-  main.appendChild(form);
+  const listCard = card("YOUR HABITS", `${completedHabitsCount()}/${data.habits.length} completed today`);
+  if (!data.habits.length) listCard.appendChild(emptyState("Build your first routine.", "Choose one small habit you can repeat daily."));
+  else data.habits.forEach(habit => listCard.appendChild(makeHabitRow(habit, true)));
+  mainEl.appendChild(listCard);
 
-  const habitCard = createCard(
-    `YOUR HABITS (${data.habits.length})`
-  );
-
-  if (data.habits.length === 0) {
-    habitCard.appendChild(
-      createElement(
-        "p",
-        "secondary-text",
-        "Add one small habit to begin."
-      )
-    );
-  } else {
-    const list = createElement("div", "habit-list");
-
+  if (data.habits.length) {
+    const historyCard = card("LAST 7 DAYS", "A simple record of consistency");
+    const grid = el("div", "habit-history");
+    const start = addDays(todayKey(), -6);
     data.habits.forEach(habit => {
-      list.appendChild(createHabitItem(habit, true));
+      const item = el("div", "history-row");
+      item.appendChild(el("strong", "", habit.title));
+      const days = el("div", "history-days");
+      for (let i = 0; i < 7; i++) {
+        const key = addDays(start, i);
+        const cell = el("span", `history-dot${habit.completedDates.includes(key) ? " done" : ""}`);
+        cell.title = `${formatDate(key)}${habit.completedDates.includes(key) ? " · Done" : ""}`;
+        days.appendChild(cell);
+      }
+      item.appendChild(days);
+      grid.appendChild(item);
     });
-
-    habitCard.appendChild(list);
+    historyCard.appendChild(grid);
+    mainEl.appendChild(historyCard);
   }
-
-  main.appendChild(habitCard);
 }
 
-function createHabitItem(habit, allowDelete = false) {
-  const item = createElement("div", "habit-item");
-  const today = getTodayKey();
-
-  const completedToday =
-    habit.completedDates.includes(today);
-
-  const checkbox = document.createElement("input");
-
-  checkbox.type = "checkbox";
-  checkbox.checked = completedToday;
-
-  checkbox.setAttribute(
-    "aria-label",
-    `Mark ${habit.title} as ${completedToday ? "not done" : "done"} today`
-  );
-
-  checkbox.addEventListener("change", () => {
-    const previousDates = [...habit.completedDates];
-
-    if (checkbox.checked) {
-      if (!habit.completedDates.includes(today)) {
-        habit.completedDates.push(today);
-      }
-    } else {
-      habit.completedDates = habit.completedDates.filter(
-        date => date !== today
-      );
-    }
-
-    if (saveData()) {
-      showPage(currentPage);
-    } else {
-      habit.completedDates = previousDates;
-      checkbox.checked = previousDates.includes(today);
-    }
+/* ----------------------------- CALENDAR ----------------------------- */
+function calendarItemsFor(key) {
+  return {
+    tasks: data.tasks.filter(task => task.dueDate === key),
+    habits: data.habits.filter(habit => habit.completedDates.includes(key))
+  };
+}
+function renderCalendar() {
+  mainEl.replaceChildren();
+  pageIntro("SEE THE BIG PICTURE", "Calendar", "Review deadlines and the days you showed up.");
+  const shell = card("PLANNER", "Monthly and weekly views");
+  const toolbar = el("div", "calendar-toolbar");
+  const title = el("strong", "calendar-title", "");
+  const left = button("‹", "icon-button", () => moveCalendar(-1));
+  const right = button("›", "icon-button", () => moveCalendar(1));
+  const todayBtn = button("Today", "button button-secondary compact", () => {
+    calendarCursor = new Date();
+    selectedCalendarDate = todayKey();
+    renderCalendar();
   });
+  const mode = el("div", "segmented");
+  const monthBtn = button("Month", calendarMode === "Month" ? "segment active" : "segment", () => { calendarMode = "Month"; renderCalendar(); });
+  const weekBtn = button("Week", calendarMode === "Week" ? "segment active" : "segment", () => { calendarMode = "Week"; renderCalendar(); });
+  mode.append(monthBtn, weekBtn);
+  toolbar.append(left, title, right, todayBtn, mode);
+  shell.appendChild(toolbar);
 
-  const title = createElement(
-    "span",
-    "habit-title",
-    habit.title
-  );
-
-  if (completedToday) {
-    title.classList.add("completed");
+  if (calendarMode === "Month") {
+    title.textContent = monthTitle(calendarCursor);
+    const grid = el("div", "month-grid");
+    ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].forEach(day => grid.appendChild(el("div", "weekday", day)));
+    const first = new Date(calendarCursor.getFullYear(), calendarCursor.getMonth(), 1);
+    const offset = (first.getDay() + 6) % 7;
+    const totalCells = Math.ceil((offset + daysInMonth(calendarCursor.getFullYear(), calendarCursor.getMonth())) / 7) * 7;
+    for (let i = 0; i < totalCells; i++) {
+      const dayNum = i - offset + 1;
+      const d = new Date(calendarCursor.getFullYear(), calendarCursor.getMonth(), dayNum, 12);
+      const key = keyFromDate(d);
+      const inMonth = d.getMonth() === calendarCursor.getMonth();
+      const items = calendarItemsFor(key);
+      const count = items.tasks.length + items.habits.length;
+      const cell = button("", `calendar-day${inMonth ? "" : " outside"}${key === todayKey() ? " today" : ""}${key === selectedCalendarDate ? " selected" : ""}`, () => {
+        selectedCalendarDate = key;
+        renderCalendar();
+      });
+      cell.append(el("span", "day-number", String(d.getDate())));
+      if (count) cell.appendChild(el("span", "day-count", String(count)));
+      grid.appendChild(cell);
+    }
+    shell.appendChild(grid);
+  } else {
+    const weekStart = startOfWeek(keyFromDate(calendarCursor));
+    const weekEnd = addDays(weekStart, 6);
+    title.textContent = `${formatDate(weekStart, { month: "short", day: "numeric" })} – ${formatDate(weekEnd, { month: "short", day: "numeric", year: "numeric" })}`;
+    const grid = el("div", "week-grid");
+    for (let i = 0; i < 7; i++) {
+      const key = addDays(weekStart, i);
+      const items = calendarItemsFor(key);
+      const cell = button("", `week-day${key === todayKey() ? " today" : ""}${key === selectedCalendarDate ? " selected" : ""}`, () => { selectedCalendarDate = key; renderCalendar(); });
+      cell.append(el("span", "weekday", formatDate(key, { weekday: "short" })), el("strong", "week-day-number", String(dateFromKey(key).getDate())));
+      if (items.tasks.length + items.habits.length) cell.appendChild(el("span", "day-count", String(items.tasks.length + items.habits.length)));
+      grid.appendChild(cell);
+    }
+    shell.appendChild(grid);
   }
+  mainEl.appendChild(shell);
 
-  item.append(checkbox, title);
-
-  if (allowDelete) {
-    const deleteButton = createElement(
-      "button",
-      "delete-button",
-      "×"
-    );
-
-    deleteButton.type = "button";
-
-    deleteButton.setAttribute(
-      "aria-label",
-      `Delete ${habit.title}`
-    );
-
-    deleteButton.addEventListener("click", () => {
-      const confirmed = window.confirm(
-        `Delete habit "${habit.title}"?`
-      );
-
-      if (!confirmed) return;
-
-      const previousHabits = data.habits;
-
-      data.habits = data.habits.filter(
-        entry => entry.id !== habit.id
-      );
-
-      if (saveData()) {
-        renderHabits();
-      } else {
-        data.habits = previousHabits;
-      }
-    });
-
-    item.appendChild(deleteButton);
-  }
-
-  return item;
+  const selected = calendarItemsFor(selectedCalendarDate);
+  const selectedCard = card(formatDate(selectedCalendarDate, { weekday: "long", month: "long", day: "numeric", year: "numeric" }), "Scheduled tasks and completed habits");
+  if (!selected.tasks.length && !selected.habits.length) selectedCard.appendChild(emptyState("Nothing recorded.", "Tasks with this due date and completed habits will appear here."));
+  selected.tasks.forEach(task => selectedCard.appendChild(makeTaskRow(task, true)));
+  selected.habits.forEach(habit => {
+    const line = el("div", "calendar-entry");
+    line.append(el("span", "event-dot habit-dot"), el("span", "", habit.title), el("span", "muted small", "Habit completed"));
+    selectedCard.appendChild(line);
+  });
+  mainEl.appendChild(selectedCard);
+}
+function moveCalendar(direction) {
+  if (calendarMode === "Month") calendarCursor = new Date(calendarCursor.getFullYear(), calendarCursor.getMonth() + direction, 1, 12);
+  else calendarCursor.setDate(calendarCursor.getDate() + direction * 7);
+  selectedCalendarDate = keyFromDate(calendarCursor);
+  renderCalendar();
 }
 
-// =========================================
-// 18. BACKUP INTERFACE
-// =========================================
-
-function renderBackupSection() {
-  const backupCard = createCard("DATA BACKUP");
-
-  backupCard.appendChild(
-    createElement(
-      "p",
-      "secondary-text",
-      "Protect your Tasks and Habits by keeping a backup file."
-    )
+/* ----------------------------- ANALYTICS ----------------------------- */
+function renderAnalytics() {
+  mainEl.replaceChildren();
+  pageIntro("MEASURE WHAT MATTERS", "Analytics", "Use the numbers to learn, not to judge yourself.");
+  const totalTasks = data.tasks.length;
+  const doneTasks = completedTasksCount();
+  const activeTasks = totalTasks - doneTasks;
+  const totalHabits = data.habits.length;
+  const doneHabits = completedHabitsCount();
+  const overview = card("OVERVIEW", "Current snapshot");
+  const statGrid = el("div", "analytics-grid");
+  statGrid.append(
+    analyticsStat("TASKS COMPLETED", `${doneTasks}/${totalTasks}`, totalTasks ? Math.round(doneTasks / totalTasks * 100) : 0),
+    analyticsStat("ACTIVE TASKS", String(activeTasks), null),
+    analyticsStat("HABITS TODAY", `${doneHabits}/${totalHabits}`, totalHabits ? Math.round(doneHabits / totalHabits * 100) : 0),
+    analyticsStat("OVERDUE TASKS", String(data.tasks.filter(taskIsOverdue).length), null)
   );
+  overview.appendChild(statGrid);
+  mainEl.appendChild(overview);
 
-  const actions = createElement("div", "backup-actions");
+  const priorities = card("OPEN TASKS BY PRIORITY");
+  PRIORITIES.forEach(priority => {
+    const count = data.tasks.filter(t => !t.completed && t.priority === priority).length;
+    priorities.appendChild(analyticsLine(priority, count, activeTasks ? count / activeTasks * 100 : 0));
+  });
+  mainEl.appendChild(priorities);
 
-  actions.style.cssText = [
-    "display:flex",
-    "flex-direction:column",
-    "gap:10px",
-    "margin-top:16px"
-  ].join(";");
+  const categories = card("TASKS BY CATEGORY");
+  CATEGORIES.forEach(category => {
+    const count = data.tasks.filter(t => t.category === category).length;
+    categories.appendChild(analyticsLine(category, count, totalTasks ? count / totalTasks * 100 : 0));
+  });
+  mainEl.appendChild(categories);
 
-  const exportButton = createElement(
-    "button",
-    "primary-button",
-    "↓ Export Backup"
-  );
+  const weekly = card("LAST 7 DAYS", "Tasks completed and habits checked");
+  const chart = el("div", "week-chart");
+  const start = addDays(todayKey(), -6);
+  for (let i = 0; i < 7; i++) {
+    const key = addDays(start, i);
+    const taskCount = data.tasks.filter(t => t.completed && t.completedAt === key).length;
+    const habitCount = data.habits.filter(h => h.completedDates.includes(key)).length;
+    const total = taskCount + habitCount;
+    const col = el("div", "chart-column");
+    const bar = el("div", "chart-bar-wrap");
+    const fill = el("div", "chart-bar");
+    fill.style.height = `${Math.max(4, Math.min(100, total * 18))}%`;
+    bar.appendChild(fill);
+    col.append(bar, el("strong", "", String(total)), el("span", "muted tiny", formatDate(key, { weekday: "short" })));
+    chart.appendChild(col);
+  }
+  weekly.appendChild(chart);
+  mainEl.appendChild(weekly);
 
-  exportButton.type = "button";
+  const habitStats = card("HABIT CONSISTENCY", "Current streaks");
+  if (!data.habits.length) habitStats.appendChild(emptyState("No habits yet.", "Add habits to start tracking consistency."));
+  else data.habits.forEach(habit => {
+    const line = el("div", "analytics-line");
+    line.append(el("span", "", habit.title), el("strong", "", `${habitStreak(habit)} days`));
+    habitStats.appendChild(line);
+  });
+  mainEl.appendChild(habitStats);
 
-  exportButton.addEventListener("click", exportBackup);
-
-  const importButton = createElement(
-    "button",
-    "primary-button",
-    "↑ Import Backup"
-  );
-
-  importButton.type = "button";
-
-  const fileInput = document.createElement("input");
-
-  fileInput.type = "file";
+  const backup = card("DATA BACKUP", "Keep a copy of your information.");
+  backup.appendChild(el("p", "muted small", "Export a JSON backup before changing devices or importing another backup."));
+  const backupActions = el("div", "backup-actions");
+  backupActions.appendChild(button("↓ Export backup", "button button-primary", exportBackup));
+  const importBtn = button("↑ Import backup", "button button-secondary", () => fileInput.click());
+  const fileInput = input("file");
   fileInput.accept = ".json,application/json";
   fileInput.hidden = true;
-
-  fileInput.setAttribute(
-    "aria-label",
-    "Choose a DAILY OS backup file"
-  );
-
-  importButton.addEventListener("click", () => {
-    fileInput.click();
-  });
-
   fileInput.addEventListener("change", () => {
     const file = fileInput.files && fileInput.files[0];
-
-    if (file) importBackupFile(file);
-
+    if (file) importBackup(file);
     fileInput.value = "";
   });
-
-  actions.append(exportButton, importButton, fileInput);
-  backupCard.appendChild(actions);
-
-  backupCard.appendChild(
-    createElement(
-      "p",
-      "secondary-text",
-      "Importing a backup replaces your current Tasks and Habits. " +
-      "Always export your latest data before importing."
-    )
-  );
-
-  main.appendChild(backupCard);
+  backupActions.append(importBtn, fileInput);
+  backup.appendChild(backupActions);
+  mainEl.appendChild(backup);
+}
+function analyticsStat(label, value, percent) {
+  const box = el("div", "analytics-stat");
+  box.append(el("span", "eyebrow", label), el("strong", "", value));
+  if (percent !== null) box.appendChild(progressBar(percent));
+  return box;
+}
+function analyticsLine(label, count, percent) {
+  const line = el("div", "analytics-line");
+  const left = el("div", "analytics-line-main");
+  left.append(el("span", "", label), progressBar(percent));
+  line.append(left, el("strong", "", String(count)));
+  return line;
 }
 
-// =========================================
-// 19. ANALYTICS PAGE
-// =========================================
-
-function renderAnalytics() {
-  main.replaceChildren();
-
-  main.append(
-    createElement("p", "eyebrow", "MEASURE YOUR PROGRESS"),
-    createElement("h2", "page-title", "Analytics")
-  );
-
-  const taskCard = createCard("TASK OVERVIEW");
-
-  const completedTasks = getCompletedTasks();
-  const totalTasks = data.tasks.length;
-
-  const taskPercentage = totalTasks === 0
-    ? 0
-    : Math.round((completedTasks / totalTasks) * 100);
-
-  taskCard.append(
-    createElement(
-      "p",
-      "progress-text",
-      `${completedTasks} / ${totalTasks} tasks completed`
-    ),
-    createElement(
-      "p",
-      "secondary-text",
-      `${taskPercentage}% completion rate`
-    )
-  );
-
-  main.appendChild(taskCard);
-
-  const habitCard = createCard("HABIT OVERVIEW");
-
-  const completedHabits = getCompletedHabits();
-  const totalHabits = data.habits.length;
-
-  const habitPercentage = totalHabits === 0
-    ? 0
-    : Math.round((completedHabits / totalHabits) * 100);
-
-  habitCard.append(
-    createElement(
-      "p",
-      "progress-text",
-      `${completedHabits} / ${totalHabits} habits completed today`
-    ),
-    createElement(
-      "p",
-      "secondary-text",
-      `${habitPercentage}% completed today`
-    )
-  );
-
-  main.appendChild(habitCard);
-
-  const totalCard = createCard("TOTAL ACTIVITY");
-
-  totalCard.append(
-    createElement(
-      "p",
-      "progress-text",
-      `${data.tasks.length + data.habits.length} items`
-    ),
-    createElement(
-      "p",
-      "secondary-text",
-      "Your current tasks and habits combined."
-    )
-  );
-
-  main.appendChild(totalCard);
-
-  // Task priority overview
-  const priorityCard = createCard("TASK PRIORITIES");
-
-  TASK_PRIORITIES.forEach(priority => {
-    const count = data.tasks.filter(
-      task => task.priority === priority && !task.completed
-    ).length;
-
-    const row = applyStyles(
-      createElement("div", "priority-overview-row"),
-      {
-        display: "flex",
-        justifyContent: "space-between",
-        padding: "8px 0",
-        borderBottom: "1px solid #303030"
+/* ----------------------------- BACKUP ----------------------------- */
+function exportBackup() {
+  try {
+    const payload = {
+      app: "DAILY OS",
+      backupVersion: BACKUP_VERSION,
+      appVersion: APP_VERSION,
+      exportedAt: new Date().toISOString(),
+      data: JSON.parse(JSON.stringify(data))
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = el("a");
+    link.href = url;
+    link.download = `daily-os-backup-${todayKey()}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+    showToast("Backup exported.");
+  } catch (error) {
+    console.error(error);
+    showToast("Could not export backup.", "error");
+  }
+}
+function importBackup(file) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const parsed = JSON.parse(reader.result);
+      let raw = parsed;
+      if (parsed && parsed.app === "DAILY OS") {
+        if (!Number.isInteger(parsed.backupVersion) || parsed.backupVersion < 1 || parsed.backupVersion > BACKUP_VERSION) {
+          throw new Error("This backup version is not supported.");
+        }
+        raw = parsed.data;
       }
-    );
-
-    row.append(
-      createElement("span", "secondary-text", priority),
-      createElement("strong", "", String(count))
-    );
-
-    priorityCard.appendChild(row);
-  });
-
-  main.appendChild(priorityCard);
-
-  // Backup section
-  renderBackupSection();
+      const imported = normalizeData(raw);
+      if (!confirm(`Import this backup?\n\nTasks: ${imported.tasks.length}\nHabits: ${imported.habits.length}\n\nYour current data will be replaced.`)) return;
+      const previous = data;
+      data = imported;
+      if (!saveData()) { data = previous; return; }
+      editingTaskId = null;
+      editingHabitId = null;
+      showToast("Backup imported successfully.");
+      showPage(currentPage);
+    } catch (error) {
+      console.error("Backup import failed:", error);
+      showToast(error.message || "Invalid backup file.", "error");
+    }
+  };
+  reader.onerror = () => showToast("Could not read that file.", "error");
+  reader.readAsText(file);
 }
 
-// =========================================
-// 20. APP STATUS
-// =========================================
-
-console.log("DAILY OS: Version 2.0 script loaded.");
+/* ----------------------------- INITIALIZATION ----------------------------- */
+function startApp() {
+  headerEl = document.getElementById("app-header");
+  mainEl = document.getElementById("main-content");
+  navEl = document.getElementById("bottom-navigation");
+  if (!headerEl || !mainEl || !navEl) {
+    document.body.textContent = "DAILY OS could not start: required page elements are missing.";
+    return;
+  }
+  data = loadData();
+  renderHeader();
+  renderNavigation();
+  showPage("Today");
+  console.log(`DAILY OS ${APP_VERSION} ready.`);
+}
+if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", startApp, { once: true });
+else startApp();
