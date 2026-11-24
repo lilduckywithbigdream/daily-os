@@ -1,60 +1,69 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-
-  <meta
-    name="viewport"
-    content="width=device-width, initial-scale=1, viewport-fit=cover"
-  >
-
-  <meta name="theme-color" content="#0b0b0c">
-
-  <meta
-    name="description"
-    content="DAILY OS - A personal system for discipline, consistency and productivity."
-  >
-
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta
-    name="apple-mobile-web-app-status-bar-style"
-    content="black-translucent"
-  >
-
-  <meta
-    name="apple-mobile-web-app-title"
-    content="DAILY OS"
-  >
-
-  <title>DAILY OS — Personal Productivity</title>
-
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#0b0b0b">
+  <meta name="description" content="DAILY OS — Personal Productivity System">
+  <title>DAILY OS</title>
   <link rel="manifest" href="./manifest.json">
-
-  <link rel="stylesheet" href="./style.css">
-
-  <link rel="icon" href="./favicon.png">
-
   <link rel="apple-touch-icon" href="./icon-192.png">
-
-  <script src="./app.js" defer></script>
+  <link rel="stylesheet" href="./style.css?v=3.0">
+  <script src="./app.js?v=3.0" defer></script>
 </head>
-
 <body>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <div class="brand-mark">D</div>
+        <div>
+          <div class="brand-name">DAILY OS</div>
+          <div class="brand-subtitle">PERSONAL SYSTEM</div>
+        </div>
+      </div>
 
-  <div id="app">
-    <header id="app-header">
-      <!-- App header will be added here -->
-    </header>
+      <div class="sidebar-label">WORKSPACE</div>
+      <nav class="nav-list">
+        <button class="nav-link active" data-page="today"><span>◷</span> Today</button>
+        <button class="nav-link" data-page="tasks"><span>▤</span> Tasks</button>
+        <button class="nav-link" data-page="habits"><span>◉</span> Habits</button>
+        <button class="nav-link" data-page="calendar"><span>▦</span> Calendar</button>
+        <button class="nav-link" data-page="analytics"><span>▥</span> Analytics</button>
+        <button class="nav-link" data-page="backup"><span>↥</span> Backup</button>
+      </nav>
 
-    <main id="main-content">
-      <!-- Main dashboard will be added here -->
+      <div class="sidebar-bottom">
+        <div class="quote-mark">“</div>
+        <p>Small steps.<br>Every single day.</p>
+        <span>DISCIPLINE OVER MOTIVATION</span>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <header class="topbar">
+        <button class="mobile-menu" id="mobile-menu" aria-label="Open menu">☰</button>
+        <div>
+          <div class="topbar-label">PERSONAL PRODUCTIVITY</div>
+          <div class="topbar-date" id="header-date"></div>
+        </div>
+        <div class="topbar-right">
+          <span class="status-dot"></span>
+          <span>SYSTEM ACTIVE</span>
+        </div>
+      </header>
+
+      <div id="main-content" class="page-content"></div>
+
+      <footer class="footer">
+        <span>DAILY OS</span>
+        <span>BUILD YOUR DAY. BUILD YOURSELF.</span>
+      </footer>
     </main>
-
-    <nav id="bottom-navigation" aria-label="Main navigation">
-      <!-- Navigation will be added here -->
-    </nav>
   </div>
 
+  <div class="toast" id="toast" role="status"></div>
+  <div class="modal-backdrop" id="modal-backdrop">
+    <div class="modal" id="modal"></div>
+  </div>
 </body>
 </html>
