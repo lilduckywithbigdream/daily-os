@@ -1299,24 +1299,41 @@
   });
 
   // MOBILE SIDEBAR
-document.addEventListener('click', (event) => {
-  const menuButton = event.target.closest('#mobileMenu');
+  document.addEventListener('click', event => {
+    const menuButton = event.target.closest('#mobileMenu');
+    const sidebar = document.getElementById('sidebar');
 
-  if (!menuButton) return;
+    if (!sidebar) return;
 
-  const sidebar = document.getElementById('sidebar');
+    if (menuButton) {
+      const isOpen = sidebar.classList.toggle('open');
 
-  if (!sidebar) return;
+      menuButton.setAttribute('aria-expanded', String(isOpen));
+      menuButton.setAttribute(
+        'aria-label',
+        isOpen ? 'Close navigation' : 'Open navigation'
+      );
 
-  const isOpen = sidebar.classList.toggle('open');
+      return;
+    }
 
-  menuButton.setAttribute('aria-expanded', String(isOpen));
-  menuButton.setAttribute(
-    'aria-label',
-    isOpen ? 'Close navigation' : 'Open navigation'
-  );
-});
-  );
+    // Close sidebar when tapping outside it on mobile
+    if (
+      window.matchMedia('(max-width: 900px)').matches &&
+      sidebar.classList.contains('open') &&
+      !event.target.closest('#sidebar')
+    ) {
+      sidebar.classList.remove('open');
+
+      const button = document.getElementById('mobileMenu');
+
+      if (button) {
+        button.setAttribute('aria-expanded', 'false');
+        button.setAttribute('aria-label', 'Open navigation');
+      }
+    }
+  });
+
   // BACKUP IMPORT
   $('#importFile').addEventListener('change',e => {
     importBackup(e.target.files?.[0]);
